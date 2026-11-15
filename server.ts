@@ -3,6 +3,7 @@ import path from 'node:path';
 import express from 'express';
 import { handleGenerateGameNodeRequest } from './server/gameGenerator.ts';
 import { handleGenerateExamNodeRequest } from './server/examGenerator.ts';
+import { handleGenerateLessonPlanNodeRequest } from './server/lessonPlanGenerator.ts';
 import {
   handleGeneratePptImageNodeRequest,
   handleGeneratePptNodeRequest,
@@ -22,6 +23,10 @@ async function startServer() {
 
   app.all('/api/generate-exam', async (req, res) => {
     await handleGenerateExamNodeRequest(req, res);
+  });
+
+  app.all('/api/generate-lesson-plan', async (req, res) => {
+    await handleGenerateLessonPlanNodeRequest(req, res);
   });
 
   app.all('/api/generate-ppt', async (req, res) => {

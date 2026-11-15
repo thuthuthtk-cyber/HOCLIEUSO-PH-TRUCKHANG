@@ -1,8 +1,8 @@
 import { ConfirmDialog } from './ConfirmDialog';
-import { GeminiConfigModal } from './GeminiConfigModal';
 import { HocLieuForm } from './HocLieuForm';
 import { MaterialPreviewModal } from './MaterialPreviewModal';
 import { ExamGeneratorWorkspace } from './exam/ExamGeneratorWorkspace';
+import { LessonPlanGeneratorWorkspace } from './lesson/LessonPlanGeneratorWorkspace';
 import { PptGeneratorWorkspace } from './ppt/PptGeneratorWorkspace';
 import { AdminView } from '../views/AdminView';
 import { AiGameCreatorView } from '../views/AiGameCreatorView';
@@ -88,6 +88,12 @@ export function MainWorkspace({ state }: { state: KhoHocLieuState }) {
         )}
         {state.view === 'examGenerator' && (
           <ExamGeneratorWorkspace
+            profile={profile}
+            onSavedNavigate={(target) => state.navigateTo(target)}
+          />
+        )}
+        {state.view === 'lessonPlanGenerator' && (
+          <LessonPlanGeneratorWorkspace
             profile={profile}
             onSavedNavigate={(target) => state.navigateTo(target)}
           />

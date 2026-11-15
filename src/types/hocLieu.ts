@@ -7,6 +7,7 @@ export type AppView =
   | 'aiGame'
   | 'aiPpt'
   | 'examGenerator'
+  | 'lessonPlanGenerator'
   | 'approval'
   | 'admin'
   | 'profile';

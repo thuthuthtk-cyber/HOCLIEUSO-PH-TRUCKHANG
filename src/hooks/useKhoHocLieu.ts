@@ -59,7 +59,6 @@ export function useKhoHocLieu() {
   const [deleteTarget, setDeleteTarget] = useState<LearningMaterial | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [togglingShareId, setTogglingShareId] = useState<string | null>(null);
-  const [geminiConfigOpen, setGeminiConfigOpen] = useState(false);
 
   const autoSeededRef = useRef(false);
   const silentAuthAttemptedRef = useRef(false);
@@ -435,8 +434,6 @@ export function useKhoHocLieu() {
     setDeleteTarget,
     deleting,
     togglingShareId,
-    geminiConfigOpen,
-    setGeminiConfigOpen,
     handleViewMaterial,
     handleDownloadMaterial,
     handleSubmitDraft,
