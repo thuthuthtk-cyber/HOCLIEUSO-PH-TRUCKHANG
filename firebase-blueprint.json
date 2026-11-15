@@ -1,0 +1,613 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Hồ sơ giáo viên, tổ trưởng và quản trị viên trong hệ thống Kho Học Liệu Số.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "ID tài khoản / Document ID của giáo viên",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "maGV": {
+          "type": "string",
+          "description": "Mã giáo viên (ví dụ: gv-08)",
+          "maxLength": 30
+        },
+        "hoTen": {
+          "type": "string",
+          "description": "Họ và tên hiển thị",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "cccd": {
+          "type": "string",
+          "description": "Số căn cước công dân",
+          "maxLength": 20
+        },
+        "ngaySinh": {
+          "type": "string",
+          "description": "Ngày sinh của giáo viên",
+          "maxLength": 20
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Email đăng nhập",
+          "minLength": 5,
+          "maxLength": 150
+        },
+        "soDienThoai": {
+          "type": "string",
+          "description": "Số điện thoại liên hệ",
+          "maxLength": 20
+        },
+        "chucVu": {
+          "type": "string",
+          "description": "Chức vụ công tác (Hiệu trưởng (BGH), Quản trị viên (ADMIN), Tổ trưởng chuyên môn, Giáo viên)",
+          "maxLength": 80
+        },
+        "toChuyenMon": {
+          "type": "string",
+          "description": "Tổ chuyên môn trực thuộc",
+          "maxLength": 80
+        },
+        "role": {
+          "type": "string",
+          "description": "Mã vai trò phân quyền chuẩn hóa",
+          "enum": ["ADMIN", "TO_TRUONG", "GIAO_VIEN"]
+        },
+        "vaiTro": {
+          "type": "string",
+          "description": "Vai trò phân quyền Firestore",
+          "enum": ["giaoVien", "toTruong", "quanTri"]
+        },
+        "toKhoi": {
+          "type": "string",
+          "description": "Tổ khối công tác",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "biKhoa": {
+          "type": "boolean",
+          "description": "Trạng thái khóa tài khoản"
+        },
+        "yeuCauDoiMatKhau": {
+          "type": "boolean",
+          "description": "Bắt buộc đổi mật khẩu ở lần đăng nhập đầu tiên"
+        },
+        "ngayTao": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian tạo tài khoản"
+        },
+        "ngayCapNhat": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian cập nhật gần nhất"
+        }
+      },
+      "required": [
+        "uid",
+        "hoTen",
+        "email",
+        "vaiTro",
+        "toKhoi",
+        "biKhoa",
+        "yeuCauDoiMatKhau",
+        "ngayTao",
+        "ngayCapNhat"
+      ]
+    },
+    "LearningMaterial": {
+      "title": "LearningMaterial",
+      "description": "Học liệu số do giáo viên đóng góp và được tổ trưởng hoặc quản trị viên duyệt.",
+      "type": "object",
+      "properties": {
+        "tieuDe": {
+          "type": "string",
+          "description": "Tiêu đề học liệu",
+          "minLength": 2,
+          "maxLength": 200
+        },
+        "moTa": {
+          "type": "string",
+          "description": "Mô tả ngắn nội dung học liệu",
+          "maxLength": 2000
+        },
+        "monHoc": {
+          "type": "string",
+          "description": "Tên môn học",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "khoiLop": {
+          "type": "string",
+          "description": "Khối lớp áp dụng",
+          "enum": ["1", "2", "3", "4", "5", "Dùng chung"]
+        },
+        "loai": {
+          "type": "string",
+          "description": "Phân loại học liệu",
+          "enum": [
+            "Bài giảng PPT AI",
+            "Bài giảng điện tử",
+            "Giáo án",
+            "Video",
+            "Đề kiểm tra",
+            "Bài tập tương tác",
+            "Hình ảnh",
+            "Video tương tác",
+            "Bài giảng E-learning",
+            "Khác"
+          ]
+        },
+        "the": {
+          "type": "array",
+          "description": "Danh sách thẻ từ khóa (tối đa 10 thẻ)"
+        },
+        "loaiNguon": {
+          "type": "string",
+          "description": "Nguồn học liệu là tệp tải lên, liên kết ngoài, trò chơi AI hay bài giảng PPT AI",
+          "enum": ["tep", "lienKet", "troChoi", "pptAi"]
+        },
+        "slidesData": {
+          "type": "array",
+          "description": "Mảng dữ liệu JSON cấu trúc nội dung các slide bài giảng PPT AI (không chứa ảnh nặng)"
+        },
+        "pptConfig": {
+          "type": "object",
+          "description": "Cấu hình phong cách và mascot đi kèm bài giảng PPT AI"
+        },
+        "htmlTroChoi": {
+          "type": "string",
+          "description": "Mã nguồn HTML tự chứa của trò chơi AI",
+          "maxLength": 350000
+        },
+        "maChiaSe": {
+          "type": "string",
+          "description": "Mã chia sẻ ngẫu nhiên 20 ký tự cho học sinh",
+          "maxLength": 20
+        },
+        "chiaSeLink": {
+          "type": "boolean",
+          "description": "Cờ bật/tắt đường link công khai cho học sinh"
+        },
+        "tenBaiHoc": {
+          "type": "string",
+          "description": "Tên bài học / nội dung kiến thức của trò chơi AI hoặc bài giảng PPT AI",
+          "maxLength": 200
+        },
+        "dangTroChoi": {
+          "type": "string",
+          "description": "Dạng trò chơi AI (Trắc nghiệm, Ghép đôi, Ô chữ, Kéo thả, Đúng/Sai, Tự do (sáng tạo))",
+          "maxLength": 60
+        },
+        "url": {
+          "type": "string",
+          "description": "Đường dẫn tới tệp, liên kết ngoài hoặc link công khai trò chơi",
+          "minLength": 5,
+          "maxLength": 2000
+        },
+        "tenTep": {
+          "type": "string",
+          "description": "Tên tệp gốc nếu tải lên Storage",
+          "maxLength": 255
+        },
+        "kichThuocTep": {
+          "type": "number",
+          "description": "Dung lượng tệp tính bằng byte (tối đa 50MB)"
+        },
+        "duongDanStorage": {
+          "type": "string",
+          "description": "Đường dẫn nội bộ trên Firebase Storage",
+          "maxLength": 500
+        },
+        "nguoiDangUid": {
+          "type": "string",
+          "description": "UID người đăng học liệu",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nguoiDangTen": {
+          "type": "string",
+          "description": "Họ tên giáo viên đăng tải",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "toKhoi": {
+          "type": "string",
+          "description": "Tổ khối quản lý học liệu",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "trangThai": {
+          "type": "string",
+          "description": "Trạng thái quy trình duyệt",
+          "enum": ["nhap", "choDuyet", "daDuyet", "chiaSeToanTruong", "tuChoi"]
+        },
+        "lyDoTuChoi": {
+          "type": "string",
+          "description": "Ghi chú lý do từ chối nếu có",
+          "maxLength": 1000
+        },
+        "luotXem": {
+          "type": "number",
+          "description": "Số lượt xem học liệu"
+        },
+        "luotTai": {
+          "type": "number",
+          "description": "Số lượt tải về học liệu"
+        },
+        "ngayTao": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian tạo"
+        },
+        "ngayCapNhat": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian cập nhật"
+        },
+        "ngayDuyet": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian duyệt"
+        },
+        "nguoiDuyetUid": {
+          "type": "string",
+          "description": "UID người duyệt",
+          "maxLength": 128
+        },
+        "nguoiDuyetTen": {
+          "type": "string",
+          "description": "Tên người duyệt",
+          "maxLength": 120
+        },
+        "isSample": {
+          "type": "boolean",
+          "description": "Đánh dấu dữ liệu mẫu để dễ dàng xóa bỏ"
+        }
+      },
+      "required": [
+        "tieuDe",
+        "moTa",
+        "monHoc",
+        "khoiLop",
+        "loai",
+        "the",
+        "loaiNguon",
+        "url",
+        "tenTep",
+        "kichThuocTep",
+        "duongDanStorage",
+        "nguoiDangUid",
+        "nguoiDangTen",
+        "toKhoi",
+        "trangThai",
+        "lyDoTuChoi",
+        "luotXem",
+        "luotTai",
+        "ngayTao",
+        "ngayCapNhat",
+        "ngayDuyet",
+        "nguoiDuyetUid",
+        "nguoiDuyetTen",
+        "isSample"
+      ]
+    },
+    "SubjectItem": {
+      "title": "SubjectItem",
+      "description": "Danh mục môn học do Quản trị viên quản lý.",
+      "type": "object",
+      "properties": {
+        "ten": {
+          "type": "string",
+          "description": "Tên môn học",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "thuTu": {
+          "type": "number",
+          "description": "Thứ tự hiển thị"
+        },
+        "kichHoat": {
+          "type": "boolean",
+          "description": "Trạng thái hiển thị"
+        },
+        "isSample": {
+          "type": "boolean",
+          "description": "Đánh dấu dữ liệu mẫu"
+        },
+        "ngayTao": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian tạo"
+        },
+        "ngayCapNhat": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian cập nhật"
+        }
+      },
+      "required": ["ten", "thuTu", "kichHoat", "isSample", "ngayTao", "ngayCapNhat"]
+    },
+    "DepartmentItem": {
+      "title": "DepartmentItem",
+      "description": "Danh sách tổ khối chuyên môn và văn phòng của nhà trường.",
+      "type": "object",
+      "properties": {
+        "ten": {
+          "type": "string",
+          "description": "Tên tổ khối",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "moTa": {
+          "type": "string",
+          "description": "Mô tả các môn hoặc thành viên thuộc tổ khối",
+          "maxLength": 250
+        },
+        "thuTu": {
+          "type": "number",
+          "description": "Thứ tự hiển thị"
+        },
+        "kichHoat": {
+          "type": "boolean",
+          "description": "Trạng thái hiển thị"
+        },
+        "isSample": {
+          "type": "boolean",
+          "description": "Đánh dấu dữ liệu mẫu"
+        },
+        "ngayTao": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian tạo"
+        },
+        "ngayCapNhat": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian cập nhật"
+        }
+      },
+      "required": ["ten", "moTa", "thuTu", "kichHoat", "isSample", "ngayTao", "ngayCapNhat"]
+    },
+    "PublicGame": {
+      "title": "PublicGame",
+      "description": "Bản sao công khai tối giản của trò chơi AI theo mã chia sẻ 20 ký tự để học sinh chơi toàn màn hình không cần đăng nhập.",
+      "type": "object",
+      "properties": {
+        "maChiaSe": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 20
+        },
+        "materialId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "tieuDe": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 200
+        },
+        "monHoc": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "khoiLop": {
+          "type": "string",
+          "enum": ["1", "2", "3", "4", "5", "Dùng chung"]
+        },
+        "dangTroChoi": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "htmlTroChoi": {
+          "type": "string",
+          "minLength": 50,
+          "maxLength": 350000
+        },
+        "chiaSeLink": {
+          "type": "boolean"
+        },
+        "nguoiDangUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "toKhoi": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "ngayTao": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ngayCapNhat": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "maChiaSe",
+        "materialId",
+        "tieuDe",
+        "monHoc",
+        "khoiLop",
+        "dangTroChoi",
+        "htmlTroChoi",
+        "chiaSeLink",
+        "nguoiDangUid",
+        "toKhoi",
+        "ngayTao",
+        "ngayCapNhat"
+      ]
+    },
+    "AiGameQuota": {
+      "title": "AiGameQuota",
+      "description": "Theo dõi giới hạn 20 lượt tạo trò chơi AI mỗi ngày cho từng giáo viên.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "date": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10
+        },
+        "count": {
+          "type": "number"
+        },
+        "ngayCapNhat": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "date", "count", "ngayCapNhat"]
+    },
+    "ExamRecord": {
+      "title": "ExamRecord",
+      "description": "Bộ đề kiểm tra định kì (Ma trận, Bản đặc tả, Đề bài và Đáp án biểu điểm) do giáo viên tạo bằng AI và lưu trên Firestore.",
+      "type": "object",
+      "properties": {
+        "tieuDe": {
+          "type": "string",
+          "description": "Tên đề kiểm tra định kì",
+          "minLength": 2,
+          "maxLength": 220
+        },
+        "config": {
+          "type": "object",
+          "description": "Cấu hình đề kiểm tra theo GDPT 2018 & Thông tư 27"
+        },
+        "maTran": {
+          "type": "array",
+          "description": "Danh sách các hàng Ma trận đề kiểm tra"
+        },
+        "banDacTa": {
+          "type": "array",
+          "description": "Danh sách các hàng Bản đặc tả đề kiểm tra"
+        },
+        "deKiemTra": {
+          "type": "array",
+          "description": "Danh sách câu hỏi, đáp án chi tiết và hướng dẫn chấm điểm"
+        },
+        "tongDiem": {
+          "type": "number",
+          "description": "Tổng điểm toàn bài (10.0)"
+        },
+        "nguoiTaoUid": {
+          "type": "string",
+          "description": "UID giáo viên tạo đề",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nguoiTaoTen": {
+          "type": "string",
+          "description": "Họ tên giáo viên tạo đề",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "toKhoi": {
+          "type": "string",
+          "description": "Tổ khối chuyên môn của giáo viên",
+          "maxLength": 80
+        },
+        "chiaSeKho": {
+          "type": "boolean",
+          "description": "Cờ đánh dấu đề kiểm tra đã chia sẻ lên Kho học liệu"
+        },
+        "trangThai": {
+          "type": "string",
+          "description": "Trạng thái lưu trữ đề kiểm tra",
+          "enum": ["nhap", "daLuu", "chiaSeKho"]
+        },
+        "materialId": {
+          "type": "string",
+          "description": "ID bản ghi tương ứng trong collection materials nếu đã chia sẻ",
+          "maxLength": 128
+        },
+        "ngayTao": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ngayCapNhat": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "tieuDe",
+        "config",
+        "maTran",
+        "banDacTa",
+        "deKiemTra",
+        "tongDiem",
+        "nguoiTaoUid",
+        "nguoiTaoTen",
+        "toKhoi",
+        "chiaSeKho",
+        "trangThai",
+        "ngayTao",
+        "ngayCapNhat"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserProfile"
+      },
+      "description": "Hồ sơ giáo viên, tổ trưởng và quản trị viên."
+    },
+    "/materials/{materialId}": {
+      "schema": {
+        "$ref": "#/entities/LearningMaterial"
+      },
+      "description": "Kho học liệu số của Trường Tiểu học Quang Hưng - Phân hiệu Trực Khang."
+    },
+    "/public_games/{shareCode}": {
+      "schema": {
+        "$ref": "#/entities/PublicGame"
+      },
+      "description": "Trò chơi AI công khai cho học sinh truy cập bằng mã chia sẻ 20 ký tự."
+    },
+    "/ai_game_quotas/{quotaId}": {
+      "schema": {
+        "$ref": "#/entities/AiGameQuota"
+      },
+      "description": "Giới hạn số lượt tạo trò chơi AI theo ngày của giáo viên."
+    },
+    "/exams/{examId}": {
+      "schema": {
+        "$ref": "#/entities/ExamRecord"
+      },
+      "description": "Kho đề kiểm tra định kì kèm Ma trận, Bản đặc tả và Đáp án do giáo viên tạo bằng AI."
+    },
+    "/subjects/{subjectId}": {
+      "schema": {
+        "$ref": "#/entities/SubjectItem"
+      },
+      "description": "Danh mục môn học."
+    },
+    "/departments/{deptId}": {
+      "schema": {
+        "$ref": "#/entities/DepartmentItem"
+      },
+      "description": "Danh sách tổ khối chuyên môn."
+    }
+  }
+}

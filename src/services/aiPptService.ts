@@ -1,0 +1,535 @@
+import {
+  collection,
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+} from 'firebase/firestore';
+import { auth, db, handleFirestoreError, OperationType } from '../config/firebase';
+import type { LearningMaterial, MaterialStatus, UserProfile } from '../types/hocLieu';
+import {
+  getPptStyleById,
+  type PptGradeLevel,
+  type PptGenerationConfig,
+  type PptOutlineResponse,
+  type PptSlideItem,
+  type PptStyleId,
+  type SavedPptConfig,
+  type SavedPptSlideData,
+  type SlideImageStatus,
+} from '../types/ppt';
+
+export const PPT_IMAGE_MAX_CONCURRENCY = 3;
+export const PPT_IMAGE_TIMEOUT_MS = 45_000;
+export const PPT_IMAGE_MAX_RETRIES = 2;
+
+async function getTeacherIdToken(): Promise<string> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('Vui lòng đăng nhập tài khoản giáo viên trước khi tạo bài giảng PPT AI.');
+  }
+  return user.getIdToken();
+}
+
+export async function generatePptOutline(
+  config: PptGenerationConfig
+): Promise<PptOutlineResponse> {
+  const idToken = await getTeacherIdToken();
+
+  const response = await fetch('/api/generate-ppt', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify(config),
+  });
+
+  const data = (await response.json().catch(() => ({}))) as Partial<PptOutlineResponse> & {
+    error?: string;
+  };
+
+  if (!response.ok || !Array.isArray(data.slides)) {
+    throw new Error(
+      data.error || `Không thể tạo dàn ý bài giảng PPT (mã lỗi ${response.status}).`
+    );
+  }
+
+  return data as PptOutlineResponse;
+}
+
+export interface SlideImageRequestParams {
+  scenePrompt: string;
+  slideTitle: string;
+  monHoc: string;
+  khoiLop: string;
+  styleId: PptStyleId;
+  sharedStylePrompt: string;
+  mascotIds: string[];
+}
+
+export async function requestSingleSlideImage(
+  params: SlideImageRequestParams,
+  externalSignal?: AbortSignal
+): Promise<{ imageDataUrl: string; modelUsed: string }> {
+  const idToken = await getTeacherIdToken();
+
+  const controller = new AbortController();
+  let timedOut = false;
+
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, PPT_IMAGE_TIMEOUT_MS);
+
+  const onExternalAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      window.clearTimeout(timer);
+      throw new DOMException('Đã hủy tác vụ sinh ảnh.', 'AbortError');
+    }
+    externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+
+  try {
+    const response = await fetch('/api/generate-ppt-image', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify(params),
+      signal: controller.signal,
+    });
+
+    const data = (await response.json().catch(() => ({}))) as {
+      imageDataUrl?: string;
+      modelUsed?: string;
+      error?: string;
+    };
+
+    if (!response.ok || !data.imageDataUrl) {
+      throw new Error(
+        data.error || `Không thể sinh ảnh minh họa (mã lỗi ${response.status}).`
+      );
+    }
+
+    return {
+      imageDataUrl: data.imageDataUrl,
+      modelUsed: data.modelUsed || 'gemini-image',
+    };
+  } catch (err) {
+    if (timedOut) {
+      throw new Error('Hết thời gian chờ sinh ảnh (timeout 45 giây).');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+    if (externalSignal) {
+      externalSignal.removeEventListener('abort', onExternalAbort);
+    }
+  }
+}
+
+export async function generateImageWithRetry(
+  params: SlideImageRequestParams,
+  options?: {
+    maxRetries?: number;
+    signal?: AbortSignal;
+    onAttempt?: (attempt: number, maxAttempts: number) => void;
+  }
+): Promise<{ imageDataUrl: string; modelUsed: string; retriesUsed: number }> {
+  const maxRetries = options?.maxRetries ?? PPT_IMAGE_MAX_RETRIES;
+  const maxAttempts = maxRetries + 1;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (options?.signal?.aborted) {
+      throw new DOMException('Đã hủy tác vụ sinh ảnh.', 'AbortError');
+    }
+
+    options?.onAttempt?.(attempt, maxAttempts);
+
+    try {
+      const result = await requestSingleSlideImage(params, options?.signal);
+      return {
+        ...result,
+        retriesUsed: attempt - 1,
+      };
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
+      lastError = err;
+      if (attempt < maxAttempts) {
+        const delayMs = 900 * attempt;
+        await new Promise<void>((resolve, reject) => {
+          const timeoutId = window.setTimeout(resolve, delayMs);
+          if (options?.signal) {
+            const abortWait = () => {
+              window.clearTimeout(timeoutId);
+              reject(new DOMException('Đã hủy tác vụ sinh ảnh.', 'AbortError'));
+            };
+            options.signal.addEventListener('abort', abortWait, { once: true });
+          }
+        });
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Không thể tạo ảnh sau nhiều lần thử.');
+}
+
+export interface BatchImageProgress {
+  total: number;
+  completed: number;
+  succeeded: number;
+  failed: number;
+  active: number;
+}
+
+export async function generateSlideImagesInParallel(params: {
+  slides: PptSlideItem[];
+  monHoc: string;
+  khoiLop: string;
+  sharedStylePrompt: string;
+  mascotIds: string[];
+  signal?: AbortSignal;
+  onSlidePatch: (
+    slideId: string,
+    patch: {
+      imageStatus: SlideImageStatus;
+      imageDataUrl?: string | null;
+      imageError?: string;
+      retryCount?: number;
+      isCustomUpload?: boolean;
+    }
+  ) => void;
+  onProgress: (progress: BatchImageProgress) => void;
+}): Promise<void> {
+  const {
+    slides,
+    monHoc,
+    khoiLop,
+    sharedStylePrompt,
+    mascotIds,
+    signal,
+    onSlidePatch,
+    onProgress,
+  } = params;
+
+  const total = slides.length;
+  let completed = 0;
+  let succeeded = 0;
+  let failed = 0;
+  let active = 0;
+  let nextIndex = 0;
+
+  const emitProgress = () => {
+    onProgress({ total, completed, succeeded, failed, active });
+  };
+
+  for (const slide of slides) {
+    onSlidePatch(slide.id, {
+      imageStatus: 'queued',
+      imageError: undefined,
+      retryCount: 0,
+    });
+  }
+  emitProgress();
+
+  async function worker(): Promise<void> {
+    while (true) {
+      if (signal?.aborted) return;
+      const idx = nextIndex;
+      nextIndex += 1;
+      if (idx >= slides.length) return;
+
+      const slide = slides[idx];
+      active += 1;
+      onSlidePatch(slide.id, {
+        imageStatus: 'generating',
+        imageError: undefined,
+        retryCount: 0,
+      });
+      emitProgress();
+
+      try {
+        const res = await generateImageWithRetry(
+          {
+            scenePrompt: slide.imageScenePrompt,
+            slideTitle: slide.title,
+            monHoc,
+            khoiLop,
+            styleId: slide.styleId,
+            sharedStylePrompt,
+            mascotIds,
+          },
+          {
+            maxRetries: PPT_IMAGE_MAX_RETRIES,
+            signal,
+            onAttempt: (attempt) => {
+              if (attempt > 1) {
+                onSlidePatch(slide.id, {
+                  imageStatus: 'retrying',
+                  retryCount: attempt - 1,
+                });
+              }
+            },
+          }
+        );
+
+        succeeded += 1;
+        completed += 1;
+        active = Math.max(0, active - 1);
+        onSlidePatch(slide.id, {
+          imageStatus: 'ready',
+          imageDataUrl: res.imageDataUrl,
+          imageError: undefined,
+          retryCount: res.retriesUsed,
+          isCustomUpload: false,
+        });
+        emitProgress();
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          active = Math.max(0, active - 1);
+          emitProgress();
+          return;
+        }
+        failed += 1;
+        completed += 1;
+        active = Math.max(0, active - 1);
+        const msg = err instanceof Error ? err.message : 'Lỗi sinh ảnh minh họa.';
+        onSlidePatch(slide.id, {
+          imageStatus: 'error',
+          imageDataUrl: null,
+          imageError: msg,
+          retryCount: PPT_IMAGE_MAX_RETRIES,
+        });
+        emitProgress();
+      }
+    }
+  }
+
+  const workerCount = Math.min(PPT_IMAGE_MAX_CONCURRENCY, total);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+}
+
+export async function readCustomSlideImageFile(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WEBP).');
+  }
+
+  const rawDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Không đọc được tệp ảnh từ máy tính.'));
+    reader.readAsDataURL(file);
+  });
+
+  // Normalize to clean PNG/JPEG via canvas capped at 1280px wide so PptxGenJS embeds reliably
+  return new Promise<string>((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxWidth = 1280;
+      const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+      const targetW = Math.max(1, Math.round(img.width * scale));
+      const targetH = Math.max(1, Math.round(img.height * scale));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(rawDataUrl);
+        return;
+      }
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, targetW, targetH);
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => resolve(rawDataUrl);
+    img.src = rawDataUrl;
+  });
+}
+
+function buildCompactSlidesData(slides: PptSlideItem[], defaultStyleId: PptStyleId): SavedPptSlideData[] {
+  return slides.slice(0, 20).map((s, idx) => ({
+    slideNumber: idx + 1,
+    title: (s.title || `Slide ${idx + 1}`).trim().slice(0, 200),
+    bullets: (s.bullets || []).map((b) => String(b || '').trim().slice(0, 400)).filter(Boolean).slice(0, 8),
+    keyTakeaway: (s.keyTakeaway || '').trim().slice(0, 400),
+    speakerNotes: (s.speakerNotes || '').trim().slice(0, 800),
+    imageScenePrompt: (s.imageScenePrompt || '').trim().slice(0, 500),
+    visualMotif: s.visualMotif || 'book',
+    styleId: s.styleId || defaultStyleId,
+  }));
+}
+
+function getDefaultSavedPptStatus(profile: UserProfile): MaterialStatus {
+  if (profile.vaiTro === 'quanTri' || profile.role === 'ADMIN') return 'chiaSeToanTruong';
+  if (profile.vaiTro === 'toTruong' || profile.role === 'TO_TRUONG') return 'daDuyet';
+  return 'nhap';
+}
+
+export async function savePptDeckToSystem(params: {
+  profile: UserProfile;
+  existingMaterialId?: string | null;
+  deckTitle: string;
+  subtitle: string;
+  tenBaiHoc: string;
+  monHoc: string;
+  khoiLop: PptGradeLevel;
+  styleId: PptStyleId;
+  mascotIds: string[];
+  slides: PptSlideItem[];
+}): Promise<string> {
+  const {
+    profile,
+    existingMaterialId,
+    deckTitle,
+    subtitle,
+    tenBaiHoc,
+    monHoc,
+    khoiLop,
+    styleId,
+    mascotIds,
+    slides,
+  } = params;
+
+  const cleanTitle = (deckTitle || tenBaiHoc || 'Bài giảng PPT AI').trim().slice(0, 200);
+  const cleanLesson = (tenBaiHoc || cleanTitle).trim().slice(0, 200);
+  const stylePreset = getPptStyleById(styleId);
+  const slidesData = buildCompactSlidesData(slides, styleId);
+  const pptConfig: SavedPptConfig = {
+    subtitle: (subtitle || `Môn ${monHoc} · Lớp ${khoiLop}`).trim().slice(0, 250),
+    styleId,
+    mascotIds: mascotIds.slice(0, 2),
+  };
+
+  const targetRef = existingMaterialId
+    ? doc(db, 'materials', existingMaterialId)
+    : doc(collection(db, 'materials'));
+  const path = `materials/${targetRef.id}`;
+
+  const sanitizedFileBase = cleanTitle
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s-_]/g, '')
+    .trim()
+    .replace(/\s+/g, '_') || 'Bai_giang_PPT_AI';
+
+  const moTa = `Bài giảng PPT AI gồm ${slidesData.length} slide · Môn ${monHoc} · Lớp ${khoiLop} · Phong cách ${stylePreset.name}.`;
+  const tags = [
+    'bai-giang-ppt-ai',
+    monHoc.toLowerCase().slice(0, 45),
+    `khoi-${khoiLop}`,
+  ].slice(0, 10);
+
+  try {
+    const existingSnap = existingMaterialId ? await getDoc(targetRef) : null;
+
+    if (existingSnap?.exists()) {
+      const existingData = existingSnap.data() as Partial<LearningMaterial>;
+      const nextStatus: MaterialStatus =
+        profile.vaiTro === 'quanTri'
+          ? existingData.trangThai || 'chiaSeToanTruong'
+          : profile.vaiTro === 'toTruong'
+            ? 'daDuyet'
+            : existingData.trangThai === 'tuChoi' || existingData.trangThai === 'nhap'
+              ? existingData.trangThai
+              : 'nhap';
+
+      const updatePayload: Record<string, unknown> = {
+        tieuDe: cleanTitle,
+        tenBaiHoc: cleanLesson,
+        moTa,
+        monHoc,
+        khoiLop,
+        loai: 'Bài giảng PPT AI',
+        the: tags,
+        loaiNguon: 'pptAi',
+        url: `https://kho-hoc-lieu.local/ppt-ai/${targetRef.id}`,
+        tenTep: `${sanitizedFileBase}_Lop${khoiLop}.pptx`.slice(0, 255),
+        kichThuocTep: 0,
+        duongDanStorage: '',
+        toKhoi: profile.toKhoi || 'Tổ Chuyên Môn',
+        trangThai: nextStatus,
+        lyDoTuChoi: '',
+        slidesData,
+        pptConfig,
+        ngayCapNhat: serverTimestamp(),
+      };
+
+      if (profile.vaiTro === 'toTruong' && nextStatus === 'daDuyet') {
+        updatePayload.ngayDuyet = serverTimestamp();
+        updatePayload.nguoiDuyetUid = profile.uid;
+        updatePayload.nguoiDuyetTen = profile.hoTen?.trim() || 'Tổ trưởng / BGH';
+      }
+
+      await setDoc(targetRef, updatePayload, { merge: true });
+      return targetRef.id;
+    }
+
+    const initialStatus = getDefaultSavedPptStatus(profile);
+    const isAutoApproved = initialStatus === 'daDuyet' || initialStatus === 'chiaSeToanTruong';
+    const actorName = profile.hoTen?.trim() || 'Giáo viên';
+
+    await setDoc(targetRef, {
+      tieuDe: cleanTitle,
+      tenBaiHoc: cleanLesson,
+      moTa,
+      monHoc,
+      khoiLop,
+      loai: 'Bài giảng PPT AI',
+      the: tags,
+      loaiNguon: 'pptAi',
+      url: `https://kho-hoc-lieu.local/ppt-ai/${targetRef.id}`,
+      tenTep: `${sanitizedFileBase}_Lop${khoiLop}.pptx`.slice(0, 255),
+      kichThuocTep: 0,
+      duongDanStorage: '',
+      nguoiDangUid: profile.uid,
+      nguoiDangTen: actorName,
+      toKhoi: profile.toKhoi || 'Tổ Chuyên Môn',
+      trangThai: initialStatus,
+      lyDoTuChoi: '',
+      luotXem: 0,
+      luotTai: 0,
+      ngayTao: serverTimestamp(),
+      ngayCapNhat: serverTimestamp(),
+      ngayDuyet: isAutoApproved ? serverTimestamp() : null,
+      nguoiDuyetUid: isAutoApproved ? profile.uid : '',
+      nguoiDuyetTen: isAutoApproved ? actorName : '',
+      isSample: false,
+      slidesData,
+      pptConfig,
+    });
+
+    return targetRef.id;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export function reconstructSlidesFromSavedMaterial(
+  material: LearningMaterial
+): PptSlideItem[] {
+  const defaultStyleId: PptStyleId = material.pptConfig?.styleId || 'hoat_hinh_3d';
+  const rawList = Array.isArray(material.slidesData) ? material.slidesData : [];
+  return rawList.map((s, idx) => ({
+    id: `${material.id}-slide-${idx + 1}`,
+    slideNumber: s.slideNumber || idx + 1,
+    title: s.title || `Slide ${idx + 1}`,
+    bullets: Array.isArray(s.bullets) ? s.bullets : [],
+    keyTakeaway: s.keyTakeaway || '',
+    speakerNotes: s.speakerNotes || '',
+    imageScenePrompt: s.imageScenePrompt || '',
+    visualMotif: s.visualMotif || 'book',
+    styleId: s.styleId || defaultStyleId,
+    imageStatus: 'removed',
+    imageDataUrl: null,
+  }));
+}

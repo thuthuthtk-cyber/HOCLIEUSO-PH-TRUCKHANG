@@ -1,0 +1,520 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Chốt chặn mặc định: Từ chối mọi truy cập nếu chưa được cấp phép tường minh
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Các hàm trợ giúp nền tảng (Zero-Trust & RBAC)
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidShareCode(code) {
+      return code is string && code.size() == 20 && code.matches('^[a-zA-Z0-9]{20}$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function userDocExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActiveUser() {
+      return isSignedIn() && userDocExists() &&
+        (!('biKhoa' in currentUserData()) || currentUserData().biKhoa == false);
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email == 'thuthuthtk@gmail.com' &&
+        request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isActiveUser() && (
+          currentUserData().vaiTro == 'quanTri' ||
+          ('role' in currentUserData() && currentUserData().role == 'ADMIN')
+        )
+      );
+    }
+
+    function isToTruong() {
+      return isActiveUser() && (
+        currentUserData().vaiTro == 'toTruong' ||
+        ('role' in currentUserData() && currentUserData().role == 'TO_TRUONG')
+      );
+    }
+
+    function currentUserToKhoi() {
+      return ('toKhoi' in currentUserData()) ? currentUserData().toKhoi : currentUserData().toChuyenMon;
+    }
+
+    // 3. Các hàm kiểm tra hợp lệ dữ liệu (Validation Blueprints)
+    function isValidUser(data, userId) {
+      return data.keys().hasAll([
+          'hoTen', 'email', 'vaiTro', 'toKhoi',
+          'biKhoa', 'yeuCauDoiMatKhau', 'ngayTao', 'ngayCapNhat'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'hoTen', 'email', 'vaiTro', 'toKhoi',
+          'biKhoa', 'yeuCauDoiMatKhau', 'ngayTao', 'ngayCapNhat',
+          'maGV', 'cccd', 'ngaySinh', 'soDienThoai', 'chucVu', 'toChuyenMon', 'role'
+        ]) &&
+        (!('uid' in data) || (data.uid is string && data.uid.size() <= 128 && (data.uid == '' || data.uid == userId || isAdmin()))) &&
+        data.hoTen is string && data.hoTen.size() >= 2 && data.hoTen.size() <= 120 &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 150 &&
+        data.vaiTro in ['giaoVien', 'toTruong', 'quanTri'] &&
+        data.toKhoi is string && data.toKhoi.size() >= 1 && data.toKhoi.size() <= 80 &&
+        data.biKhoa is bool &&
+        data.yeuCauDoiMatKhau is bool &&
+        data.ngayTao is timestamp &&
+        data.ngayCapNhat is timestamp &&
+        (!('maGV' in data) || (data.maGV is string && data.maGV.size() <= 30)) &&
+        (!('cccd' in data) || (data.cccd is string && data.cccd.size() <= 20)) &&
+        (!('ngaySinh' in data) || (data.ngaySinh is string && data.ngaySinh.size() <= 20)) &&
+        (!('soDienThoai' in data) || (data.soDienThoai is string && data.soDienThoai.size() <= 20)) &&
+        (!('chucVu' in data) || (data.chucVu is string && data.chucVu.size() <= 80)) &&
+        (!('toChuyenMon' in data) || (data.toChuyenMon is string && data.toChuyenMon.size() <= 80)) &&
+        (!('role' in data) || (data.role in ['ADMIN', 'TO_TRUONG', 'GIAO_VIEN']));
+    }
+
+    function isValidMaterial(data) {
+      return data.keys().hasAll([
+          'tieuDe', 'moTa', 'monHoc', 'khoiLop', 'loai', 'the',
+          'loaiNguon', 'url', 'tenTep', 'kichThuocTep', 'duongDanStorage',
+          'nguoiDangUid', 'nguoiDangTen', 'toKhoi', 'trangThai',
+          'lyDoTuChoi', 'luotXem', 'luotTai', 'ngayTao', 'ngayCapNhat',
+          'ngayDuyet', 'nguoiDuyetUid', 'nguoiDuyetTen', 'isSample'
+        ]) &&
+        data.keys().hasOnly([
+          'tieuDe', 'moTa', 'monHoc', 'khoiLop', 'loai', 'the',
+          'loaiNguon', 'url', 'tenTep', 'kichThuocTep', 'duongDanStorage',
+          'nguoiDangUid', 'nguoiDangTen', 'toKhoi', 'trangThai',
+          'lyDoTuChoi', 'luotXem', 'luotTai', 'ngayTao', 'ngayCapNhat',
+          'ngayDuyet', 'nguoiDuyetUid', 'nguoiDuyetTen', 'isSample',
+          'tenBaiHoc', 'htmlTroChoi', 'maChiaSe', 'chiaSeLink', 'dangTroChoi',
+          'slidesData', 'pptConfig'
+        ]) &&
+        data.tieuDe is string && data.tieuDe.size() >= 2 && data.tieuDe.size() <= 200 &&
+        data.moTa is string && data.moTa.size() <= 2000 &&
+        data.monHoc is string && data.monHoc.size() >= 1 && data.monHoc.size() <= 100 &&
+        data.khoiLop in ['1', '2', '3', '4', '5', 'Dùng chung'] &&
+        data.loai in [
+          'Bài giảng PPT AI', 'Bài giảng điện tử', 'Giáo án', 'Video', 'Đề kiểm tra',
+          'Bài tập tương tác', 'Hình ảnh', 'Video tương tác',
+          'Bài giảng E-learning', 'Khác'
+        ] &&
+        data.the is list && data.the.size() <= 10 &&
+        (data.the.size() == 0 || (data.the[0] is string && data.the[0].size() <= 50)) &&
+        data.loaiNguon in ['tep', 'lienKet', 'troChoi', 'pptAi'] &&
+        data.url is string && data.url.size() >= 5 && data.url.size() <= 2000 &&
+        data.tenTep is string && data.tenTep.size() <= 255 &&
+        (data.kichThuocTep is int || data.kichThuocTep is float) &&
+        data.kichThuocTep >= 0 && data.kichThuocTep <= 52428800 &&
+        data.duongDanStorage is string && data.duongDanStorage.size() <= 500 &&
+        data.nguoiDangUid is string && isValidId(data.nguoiDangUid) &&
+        data.nguoiDangTen is string && data.nguoiDangTen.size() >= 1 && data.nguoiDangTen.size() <= 120 &&
+        data.toKhoi is string && data.toKhoi.size() >= 1 && data.toKhoi.size() <= 80 &&
+        data.trangThai in ['nhap', 'choDuyet', 'daDuyet', 'chiaSeToanTruong', 'tuChoi'] &&
+        data.lyDoTuChoi is string && data.lyDoTuChoi.size() <= 1000 &&
+        (data.luotXem is int || data.luotXem is float) && data.luotXem >= 0 &&
+        (data.luotTai is int || data.luotTai is float) && data.luotTai >= 0 &&
+        data.ngayTao is timestamp &&
+        data.ngayCapNhat is timestamp &&
+        (data.ngayDuyet == null || data.ngayDuyet is timestamp) &&
+        data.nguoiDuyetUid is string && data.nguoiDuyetUid.size() <= 128 &&
+        data.nguoiDuyetTen is string && data.nguoiDuyetTen.size() <= 120 &&
+        data.isSample is bool &&
+        (!('tenBaiHoc' in data) || (data.tenBaiHoc is string && data.tenBaiHoc.size() <= 200)) &&
+        (!('htmlTroChoi' in data) || (data.htmlTroChoi is string && data.htmlTroChoi.size() <= 350000)) &&
+        (!('maChiaSe' in data) || (data.maChiaSe is string && (data.maChiaSe == '' || isValidShareCode(data.maChiaSe)))) &&
+        (!('chiaSeLink' in data) || data.chiaSeLink is bool) &&
+        (!('dangTroChoi' in data) || (data.dangTroChoi is string && data.dangTroChoi.size() <= 60)) &&
+        (!('slidesData' in data) || (data.slidesData is list && data.slidesData.size() >= 1 && data.slidesData.size() <= 20 && data.slidesData[0] is map)) &&
+        (!('pptConfig' in data) || data.pptConfig is map) &&
+        (data.loaiNguon != 'pptAi' || ('slidesData' in data && data.slidesData is list && data.slidesData.size() >= 1)) &&
+        (data.loaiNguon != 'troChoi' || (
+          'htmlTroChoi' in data && data.htmlTroChoi.size() >= 50 &&
+          'maChiaSe' in data && isValidShareCode(data.maChiaSe) &&
+          'chiaSeLink' in data
+        ));
+    }
+
+    function isValidPublicGame(data, shareCode) {
+      return data.keys().hasAll([
+          'maChiaSe', 'materialId', 'tieuDe', 'monHoc', 'khoiLop',
+          'dangTroChoi', 'htmlTroChoi', 'chiaSeLink', 'nguoiDangUid',
+          'toKhoi', 'ngayTao', 'ngayCapNhat'
+        ]) &&
+        data.keys().hasOnly([
+          'maChiaSe', 'materialId', 'tieuDe', 'monHoc', 'khoiLop',
+          'dangTroChoi', 'htmlTroChoi', 'chiaSeLink', 'nguoiDangUid',
+          'toKhoi', 'ngayTao', 'ngayCapNhat'
+        ]) &&
+        data.maChiaSe == shareCode &&
+        isValidShareCode(data.maChiaSe) &&
+        isValidId(data.materialId) &&
+        data.tieuDe is string && data.tieuDe.size() >= 2 && data.tieuDe.size() <= 200 &&
+        data.monHoc is string && data.monHoc.size() >= 1 && data.monHoc.size() <= 100 &&
+        data.khoiLop in ['1', '2', '3', '4', '5', 'Dùng chung'] &&
+        data.dangTroChoi is string && data.dangTroChoi.size() >= 1 && data.dangTroChoi.size() <= 60 &&
+        data.htmlTroChoi is string && data.htmlTroChoi.size() >= 50 && data.htmlTroChoi.size() <= 350000 &&
+        data.chiaSeLink is bool &&
+        isValidId(data.nguoiDangUid) &&
+        data.toKhoi is string && data.toKhoi.size() >= 1 && data.toKhoi.size() <= 80 &&
+        data.ngayTao is timestamp &&
+        data.ngayCapNhat is timestamp;
+    }
+
+    function isValidQuota(data) {
+      return data.keys().hasAll(['uid', 'date', 'count', 'ngayCapNhat']) &&
+        data.keys().hasOnly(['uid', 'date', 'count', 'ngayCapNhat']) &&
+        isValidId(data.uid) &&
+        data.date is string && data.date.size() == 10 && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.count is int && data.count >= 1 && data.count <= 20 &&
+        data.ngayCapNhat is timestamp;
+    }
+
+    function isValidExam(data) {
+      return data.keys().hasAll([
+          'tieuDe', 'config', 'maTran', 'banDacTa', 'deKiemTra',
+          'tongDiem', 'nguoiTaoUid', 'nguoiTaoTen', 'toKhoi',
+          'chiaSeKho', 'trangThai', 'ngayTao', 'ngayCapNhat'
+        ]) &&
+        data.keys().hasOnly([
+          'tieuDe', 'config', 'maTran', 'banDacTa', 'deKiemTra',
+          'tongDiem', 'nguoiTaoUid', 'nguoiTaoTen', 'toKhoi',
+          'chiaSeKho', 'trangThai', 'materialId', 'ngayTao', 'ngayCapNhat'
+        ]) &&
+        data.tieuDe is string && data.tieuDe.size() >= 2 && data.tieuDe.size() <= 220 &&
+        data.config is map &&
+        data.config.monHoc is string && data.config.monHoc.size() >= 1 && data.config.monHoc.size() <= 100 &&
+        data.config.khoiLop in ['1', '2', '3', '4', '5'] &&
+        data.maTran is list && data.maTran.size() >= 1 && data.maTran.size() <= 20 &&
+        data.maTran[0] is map &&
+        data.banDacTa is list && data.banDacTa.size() <= 20 &&
+        (data.banDacTa.size() == 0 || data.banDacTa[0] is map) &&
+        data.deKiemTra is list && data.deKiemTra.size() >= 1 && data.deKiemTra.size() <= 40 &&
+        data.deKiemTra[0] is map &&
+        (data.tongDiem is int || data.tongDiem is float) && data.tongDiem >= 0 && data.tongDiem <= 10 &&
+        data.nguoiTaoUid is string && isValidId(data.nguoiTaoUid) &&
+        data.nguoiTaoTen is string && data.nguoiTaoTen.size() >= 1 && data.nguoiTaoTen.size() <= 120 &&
+        data.toKhoi is string && data.toKhoi.size() <= 80 &&
+        data.chiaSeKho is bool &&
+        data.trangThai in ['nhap', 'daLuu', 'chiaSeKho'] &&
+        (!('materialId' in data) || (data.materialId is string && data.materialId.size() <= 128)) &&
+        data.ngayTao is timestamp &&
+        data.ngayCapNhat is timestamp;
+    }
+
+    function isValidSubject(data) {
+      return data.keys().hasAll(['ten', 'thuTu', 'kichHoat', 'isSample', 'ngayTao', 'ngayCapNhat']) &&
+        data.keys().hasOnly(['ten', 'thuTu', 'kichHoat', 'isSample', 'ngayTao', 'ngayCapNhat']) &&
+        data.ten is string && data.ten.size() >= 1 && data.ten.size() <= 100 &&
+        (data.thuTu is int || data.thuTu is float) && data.thuTu >= 0 && data.thuTu <= 999 &&
+        data.kichHoat is bool &&
+        data.isSample is bool &&
+        data.ngayTao is timestamp &&
+        data.ngayCapNhat is timestamp;
+    }
+
+    function isValidDepartment(data) {
+      return data.keys().hasAll(['ten', 'moTa', 'thuTu', 'kichHoat', 'isSample', 'ngayTao', 'ngayCapNhat']) &&
+        data.keys().hasOnly(['ten', 'moTa', 'thuTu', 'kichHoat', 'isSample', 'ngayTao', 'ngayCapNhat']) &&
+        data.ten is string && data.ten.size() >= 1 && data.ten.size() <= 80 &&
+        data.moTa is string && data.moTa.size() <= 250 &&
+        (data.thuTu is int || data.thuTu is float) && data.thuTu >= 0 && data.thuTu <= 999 &&
+        data.kichHoat is bool &&
+        data.isSample is bool &&
+        data.ngayTao is timestamp &&
+        data.ngayCapNhat is timestamp;
+    }
+
+    function canReadMaterial(data) {
+      return isAdmin() ||
+        data.nguoiDangUid == request.auth.uid ||
+        data.trangThai == 'chiaSeToanTruong' ||
+        (data.trangThai == 'daDuyet' && data.toKhoi == currentUserToKhoi()) ||
+        (isToTruong() && data.toKhoi == currentUserToKhoi());
+    }
+
+    // 4. Quy tắc collection `users` (cô lập PII: chỉ chính chủ, cùng tổ khi truy vấn theo tổ, hoặc Quản trị)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin() || (
+        isActiveUser() && (
+          resource.data.toChuyenMon == currentUserToKhoi() ||
+          resource.data.toKhoi == currentUserToKhoi()
+        )
+      );
+
+      allow create: if isAdmin() &&
+        isValidId(userId) &&
+        isValidUser(incoming(), userId) &&
+        incoming().ngayTao == request.time &&
+        incoming().ngayCapNhat == request.time;
+
+      allow update: if isSignedIn() && isValidId(userId) && isValidUser(incoming(), userId) && (
+        // Quản trị cập nhật hồ sơ giáo viên, vai trò, tổ chuyên môn, trạng thái khóa
+        (isAdmin() &&
+          (!('uid' in existing()) || incoming().uid == existing().uid) &&
+          incoming().ngayTao == existing().ngayTao &&
+          incoming().ngayCapNhat == request.time &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'hoTen', 'email', 'vaiTro', 'toKhoi', 'biKhoa', 'yeuCauDoiMatKhau', 'ngayCapNhat',
+            'maGV', 'cccd', 'ngaySinh', 'soDienThoai', 'chucVu', 'toChuyenMon', 'role'
+          ])) ||
+        // Người dùng tự cập nhật họ tên hoặc hoàn tất đổi mật khẩu lần đầu (không thể tự nâng quyền)
+        (isActiveUser() &&
+          request.auth.uid == userId &&
+          (!('uid' in existing()) || incoming().uid == existing().uid) &&
+          incoming().email == existing().email &&
+          incoming().vaiTro == existing().vaiTro &&
+          incoming().toKhoi == existing().toKhoi &&
+          incoming().biKhoa == existing().biKhoa &&
+          incoming().ngayTao == existing().ngayTao &&
+          incoming().ngayCapNhat == request.time &&
+          (incoming().yeuCauDoiMatKhau == false || incoming().yeuCauDoiMatKhau == existing().yeuCauDoiMatKhau) &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'hoTen', 'yeuCauDoiMatKhau', 'ngayCapNhat'
+          ]))
+      );
+
+      allow delete: if isAdmin() && isValidId(userId) && request.auth.uid != userId;
+    }
+
+    // 5. Quy tắc collection `materials`
+    match /materials/{materialId} {
+      allow get: if isActiveUser() && isValidId(materialId) && canReadMaterial(existing());
+      allow list: if isActiveUser() && canReadMaterial(resource.data);
+
+      allow create: if isActiveUser() &&
+        isValidId(materialId) &&
+        isValidMaterial(incoming()) &&
+        incoming().nguoiDangUid == request.auth.uid &&
+        incoming().luotXem == 0 &&
+        incoming().luotTai == 0 &&
+        incoming().ngayTao == request.time &&
+        incoming().ngayCapNhat == request.time && (
+          isAdmin() ||
+          (incoming().trangThai in ['nhap', 'choDuyet'] &&
+           incoming().isSample == false &&
+           incoming().lyDoTuChoi == '' &&
+           incoming().ngayDuyet == null &&
+           incoming().nguoiDuyetUid == '' &&
+           incoming().nguoiDuyetTen == '') ||
+          (isToTruong() &&
+           incoming().toKhoi == currentUserToKhoi() &&
+           incoming().trangThai == 'daDuyet' &&
+           incoming().isSample == false &&
+           incoming().lyDoTuChoi == '' &&
+           incoming().ngayDuyet == request.time &&
+           incoming().nguoiDuyetUid == request.auth.uid)
+        );
+
+      allow update: if isActiveUser() &&
+        isValidId(materialId) &&
+        isValidMaterial(incoming()) &&
+        incoming().nguoiDangUid == existing().nguoiDangUid &&
+        incoming().ngayTao == existing().ngayTao &&
+        incoming().isSample == existing().isSample && (
+          (isAdmin() && incoming().ngayCapNhat == request.time) ||
+
+          (existing().nguoiDangUid == request.auth.uid &&
+           existing().trangThai in ['nhap', 'choDuyet', 'tuChoi'] &&
+           incoming().trangThai in ['nhap', 'choDuyet'] &&
+           incoming().ngayCapNhat == request.time &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'tieuDe', 'moTa', 'monHoc', 'khoiLop', 'loai', 'the',
+             'loaiNguon', 'url', 'tenTep', 'kichThuocTep', 'duongDanStorage',
+              'toKhoi', 'trangThai', 'lyDoTuChoi', 'ngayCapNhat',
+              'tenBaiHoc', 'htmlTroChoi', 'chiaSeLink', 'dangTroChoi',
+              'slidesData', 'pptConfig'
+            ])) ||
+
+          ((existing().nguoiDangUid == request.auth.uid ||
+            (isToTruong() && existing().toKhoi == currentUserToKhoi())) &&
+           existing().loaiNguon == 'troChoi' &&
+           incoming().ngayCapNhat == request.time &&
+           incoming().diff(existing()).affectedKeys().hasOnly(['chiaSeLink', 'ngayCapNhat'])) ||
+
+          (isToTruong() &&
+           existing().nguoiDangUid == request.auth.uid &&
+           incoming().toKhoi == currentUserToKhoi() &&
+           existing().trangThai in ['nhap', 'choDuyet', 'daDuyet', 'tuChoi'] &&
+           incoming().trangThai == 'daDuyet' &&
+           incoming().lyDoTuChoi == '' &&
+           incoming().nguoiDuyetUid == request.auth.uid &&
+           incoming().ngayDuyet == request.time &&
+           incoming().ngayCapNhat == request.time &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'tieuDe', 'moTa', 'monHoc', 'khoiLop', 'loai', 'the',
+             'loaiNguon', 'url', 'tenTep', 'kichThuocTep', 'duongDanStorage',
+             'toKhoi', 'trangThai', 'lyDoTuChoi', 'ngayDuyet',
+              'nguoiDuyetUid', 'nguoiDuyetTen', 'ngayCapNhat',
+              'tenBaiHoc', 'htmlTroChoi', 'chiaSeLink', 'dangTroChoi',
+              'slidesData', 'pptConfig'
+            ])) ||
+
+          (isToTruong() &&
+           existing().toKhoi == currentUserToKhoi() &&
+           existing().trangThai in ['choDuyet', 'daDuyet', 'chiaSeToanTruong', 'tuChoi'] &&
+           incoming().trangThai in ['daDuyet', 'chiaSeToanTruong', 'tuChoi'] &&
+           incoming().nguoiDuyetUid == request.auth.uid &&
+           incoming().ngayCapNhat == request.time &&
+           (incoming().ngayDuyet == request.time || incoming().ngayDuyet == null) &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'trangThai', 'lyDoTuChoi', 'ngayDuyet',
+             'nguoiDuyetUid', 'nguoiDuyetTen', 'ngayCapNhat'
+           ])) ||
+
+          (canReadMaterial(existing()) && (
+            (incoming().diff(existing()).affectedKeys().hasOnly(['luotXem']) &&
+             incoming().luotXem == existing().luotXem + 1) ||
+            (incoming().diff(existing()).affectedKeys().hasOnly(['luotTai']) &&
+             incoming().luotTai == existing().luotTai + 1)
+          ))
+        );
+
+      allow delete: if isActiveUser() && isValidId(materialId) && (
+        isAdmin() ||
+        (existing().nguoiDangUid == request.auth.uid &&
+         existing().trangThai in ['nhap', 'choDuyet', 'tuChoi'])
+      );
+    }
+
+    // 5b. Quy tắc collection `public_games` (chỉ cho phép get theo mã chia sẻ 20 ký tự khi chiaSeLink == true, cấm list)
+    match /public_games/{shareCode} {
+      allow get: if isValidShareCode(shareCode) && resource != null && resource.data.chiaSeLink == true;
+      allow list: if false;
+
+      allow create: if isActiveUser() &&
+        isValidShareCode(shareCode) &&
+        isValidPublicGame(incoming(), shareCode) &&
+        incoming().nguoiDangUid == request.auth.uid &&
+        incoming().ngayTao == request.time &&
+        incoming().ngayCapNhat == request.time;
+
+      allow update: if isActiveUser() &&
+        isValidShareCode(shareCode) &&
+        isValidPublicGame(incoming(), shareCode) &&
+        incoming().nguoiDangUid == existing().nguoiDangUid &&
+        incoming().materialId == existing().materialId &&
+        incoming().ngayTao == existing().ngayTao &&
+        incoming().ngayCapNhat == request.time &&
+        (existing().nguoiDangUid == request.auth.uid ||
+         isAdmin() ||
+         (isToTruong() && existing().toKhoi == currentUserToKhoi())) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'chiaSeLink', 'tieuDe', 'monHoc', 'khoiLop', 'dangTroChoi', 'htmlTroChoi', 'ngayCapNhat'
+        ]);
+
+      allow delete: if isActiveUser() &&
+        isValidShareCode(shareCode) &&
+        (isAdmin() || existing().nguoiDangUid == request.auth.uid);
+    }
+
+    // 5c. Quy tắc collection `ai_game_quotas` (giới hạn 20 lượt tạo trò chơi AI/ngày/người)
+    match /ai_game_quotas/{quotaId} {
+      allow get: if isActiveUser() && quotaId.matches('^' + request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}$');
+      allow list: if false;
+
+      allow create: if isActiveUser() &&
+        isValidQuota(incoming()) &&
+        quotaId == request.auth.uid + '_' + incoming().date &&
+        incoming().uid == request.auth.uid &&
+        incoming().count == 1 &&
+        incoming().ngayCapNhat == request.time;
+
+      allow update: if isActiveUser() &&
+        isValidQuota(incoming()) &&
+        quotaId == request.auth.uid + '_' + existing().date &&
+        existing().uid == request.auth.uid &&
+        incoming().uid == existing().uid &&
+        incoming().date == existing().date &&
+        incoming().count == existing().count + 1 &&
+        incoming().count <= 20 &&
+        incoming().ngayCapNhat == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['count', 'ngayCapNhat']);
+
+      allow delete: if false;
+    }
+
+    // 6. Quy tắc collection `subjects` (Danh mục môn học)
+    match /subjects/{subjectId} {
+      allow read: if isActiveUser();
+      allow create: if isAdmin() && isValidId(subjectId) && isValidSubject(incoming()) &&
+        incoming().ngayTao == request.time && incoming().ngayCapNhat == request.time;
+      allow update: if isAdmin() && isValidId(subjectId) && isValidSubject(incoming()) &&
+        incoming().ngayTao == existing().ngayTao && incoming().ngayCapNhat == request.time;
+      allow delete: if isAdmin() && isValidId(subjectId);
+    }
+
+    // 7. Quy tắc collection `departments` (Danh sách tổ khối)
+    match /departments/{deptId} {
+      allow read: if isActiveUser();
+      allow create: if isAdmin() && isValidId(deptId) && isValidDepartment(incoming()) &&
+        incoming().ngayTao == request.time && incoming().ngayCapNhat == request.time;
+      allow update: if isAdmin() && isValidId(deptId) && isValidDepartment(incoming()) &&
+        incoming().ngayTao == existing().ngayTao && incoming().ngayCapNhat == request.time;
+      allow delete: if isAdmin() && isValidId(deptId);
+    }
+
+    // 8. Quy tắc collection `exams` (Bộ đề kiểm tra AI kèm Ma trận, Bản đặc tả & Đáp án)
+    match /exams/{examId} {
+      allow get: if isActiveUser() && isValidId(examId) && (
+        isAdmin() ||
+        existing().nguoiTaoUid == request.auth.uid ||
+        existing().chiaSeKho == true
+      );
+      allow list: if isActiveUser() && (
+        isAdmin() ||
+        resource.data.nguoiTaoUid == request.auth.uid ||
+        resource.data.chiaSeKho == true
+      );
+
+      allow create: if isActiveUser() &&
+        isValidId(examId) &&
+        isValidExam(incoming()) &&
+        incoming().nguoiTaoUid == request.auth.uid &&
+        incoming().ngayTao == request.time &&
+        incoming().ngayCapNhat == request.time;
+
+      allow update: if isActiveUser() &&
+        isValidId(examId) &&
+        isValidExam(incoming()) &&
+        incoming().nguoiTaoUid == existing().nguoiTaoUid &&
+        incoming().ngayTao == existing().ngayTao &&
+        incoming().ngayCapNhat == request.time && (
+          isAdmin() ||
+          (existing().nguoiTaoUid == request.auth.uid &&
+           incoming().diff(existing()).affectedKeys().hasOnly([
+             'tieuDe', 'config', 'maTran', 'banDacTa', 'deKiemTra',
+             'tongDiem', 'toKhoi', 'chiaSeKho', 'trangThai', 'materialId', 'ngayCapNhat'
+           ]))
+        );
+
+      allow delete: if isActiveUser() && isValidId(examId) && (
+        isAdmin() || existing().nguoiTaoUid == request.auth.uid
+      );
+    }
+  }
+}

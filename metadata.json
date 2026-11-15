@@ -1,0 +1,8 @@
+{
+  "name": "Kho Học Liệu Số - Tiểu học Quang Hưng",
+  "description": "Hệ thống quản lý và chia sẻ học liệu số nội bộ cho Trường Tiểu học Quang Hưng - Phân hiệu Trực Khang.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

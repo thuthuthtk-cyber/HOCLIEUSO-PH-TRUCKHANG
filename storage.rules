@@ -1,0 +1,28 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Mặc định từ chối tất cả
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Học liệu tải lên theo thư mục của từng giáo viên (tối đa 50MB)
+    match /materials/{userId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null &&
+        request.auth.uid == userId &&
+        request.resource.size <= 50 * 1024 * 1024 &&
+        request.resource.contentType.matches(
+          'application/pdf|' +
+          'application/msword|' +
+          'application/vnd\\.openxmlformats-officedocument\\..*|' +
+          'application/vnd\\.ms-powerpoint|' +
+          'application/vnd\\.ms-excel|' +
+          'image/.*|' +
+          'video/.*'
+        );
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
