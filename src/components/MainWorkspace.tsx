@@ -1,5 +1,4 @@
 import { ConfirmDialog } from './ConfirmDialog';
-import { GeminiConfigModal } from './GeminiConfigModal';
 import { HocLieuForm } from './HocLieuForm';
 import { MaterialPreviewModal } from './MaterialPreviewModal';
 import { ExamGeneratorWorkspace } from './exam/ExamGeneratorWorkspace';

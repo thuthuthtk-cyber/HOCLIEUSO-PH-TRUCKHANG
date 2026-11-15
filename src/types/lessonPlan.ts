@@ -14,6 +14,8 @@ export type IntegrationMucDo = 'Bộ phận' | 'Liên hệ' | 'Toàn phần';
 
 export type TeacherLessonPlanType = 'GV_CHUYEN' | 'GV_CHU_NHIEM';
 
+export type IntegrationInputMode = 'paste_khgd' | 'preset_list';
+
 export interface IntegrationCategoryMeta {
   id: IntegrationCategoryId;
   stt: number;
@@ -277,6 +279,8 @@ export interface LessonPlanConfig {
   boSach: LessonPlanTextbook;
   tenBaiHoc: string;
   ngayDayLop: string;
+  integrationMode?: IntegrationInputMode;
+  customKhgdIntegrationText?: string;
   selectedIntegrations: IntegrationCategoryId[];
   mucDoGddp?: IntegrationMucDo;
   noiDungGiaoDucDiaPhuong: string;

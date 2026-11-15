@@ -54,7 +54,14 @@ QUY TẮC CHUẨN HÓA VĂN PHONG GIÁO ÁN CỦA TRƯỜNG:
      * Đồng thời, trong \`hoatDongGV\` (cột trái) ghi rõ thao tác, câu hỏi gợi mở của GV và trong \`hoatDongHS\` (cột phải) ghi rõ câu trả lời/thực hành của HS cho nội dung lồng ghép đó!
      * Hoạt động nào không lồng ghép thì để \`noiDungTichHopLongGhep = ""\`.
 
-4. Lưu ý học sinh khuyết tật học hòa nhập (\`luuYHSKT\`):
+4. QUY TẮC BẮT BUỘC KHI GIÁO VIÊN DÁN NỘI DUNG TỪ KẾ HOẠCH GIÁO DỤC (KHGD):
+   - Khi có khối nội dung KHGD do giáo viên dán trực tiếp, AI phải TUÂN THỦ TUYỆT ĐỐI 100% NỘI DUNG GIÁO VIÊN ĐÃ DÁN:
+     * Giữ nguyên chính xác từng mã chỉ báo (VD: \`NLS 1.1.CB1.a\`, \`NLS 4.3.CB1.b\`, \`AI 3.A1.3\`, \`AI (Khung 3439) - 3.C5.1\`, \`GDKNS\`, \`GDĐP\`, \`QPAN\`, \`GDBVMT\`, \`STEAM\`...) và nội dung mà giáo viên đã dán. TUYỆT ĐỐI KHÔNG tự ý đổi sang mã khác hoặc bỏ sót bất kỳ mã nào giáo viên đã nhập (kể cả khi có nhiều hơn 1 mã NLS/AI trong cùng 1 tiết).
+     * Đưa đầy đủ và chính xác các mã NLS/AI đã dán vào Mục \`I.2.a)\` (\`nangLucDacThu\`).
+     * Trình bày khớp hoàn toàn với nội dung KHGD đã dán tại Mục \`I.3. Giáo dục tích hợp/lồng ghép\` (\`giaoDucTichHop\`).
+     * Trong Bảng \`III. HOẠT ĐỘNG DẠY HỌC\`, đặt dòng \`Nội dung lồng ghép, tích hợp: ...\` vào đúng hoạt động phù hợp nhất (Khởi động / Khám phá HĐ1, HĐ2 / Luyện tập HĐ1, HĐ2 / Vận dụng) và triển khai chi tiết \`hoatDongGV\` - \`hoatDongHS\` đúng theo gợi ý hoạt động trong đoạn KHGD giáo viên đã dán.
+
+5. Lưu ý học sinh khuyết tật học hòa nhập (\`luuYHSKT\`):
    - Khi lớp CÓ học sinh khuyết tật: AI BẮT BUỘC soạn chi tiết hướng dẫn điều chỉnh vừa sức theo từng hoạt động trên nhiều dòng rõ ràng:
      "- Đối tượng HSKT: [Tóm tắt thông tin HSKT giáo viên đã nhập]
 - Khởi động: [Điều chỉnh hoạt động khởi động cho HSKT]
@@ -258,25 +265,33 @@ function normalizeActivityStep(
 }
 
 function buildLessonPlanPrompt(config: LessonPlanConfig): string {
-  const selectedIds = new Set<IntegrationCategoryId>(config.selectedIntegrations || []);
-  if (config.noiDungGiaoDucDiaPhuong?.trim()) {
+  const customKhgdText = config.customKhgdIntegrationText?.trim() || '';
+  const isPasteMode = config.integrationMode === 'paste_khgd' || Boolean(customKhgdText);
+
+  const selectedIds = new Set<IntegrationCategoryId>(
+    isPasteMode ? [] : config.selectedIntegrations || []
+  );
+  if (!isPasteMode && config.noiDungGiaoDucDiaPhuong?.trim()) {
     selectedIds.add('GDDP');
   }
   if (
-    (config.maNlsSelected && config.maNlsSelected.length > 0) ||
-    config.chiTietNlsAi?.trim()
+    !isPasteMode &&
+    ((config.maNlsSelected && config.maNlsSelected.length > 0) ||
+      config.chiTietNlsAi?.trim())
   ) {
     selectedIds.add('CDS_NLS_AI');
   }
 
   const selectedMetas = INTEGRATION_CATEGORIES.filter((cat) => selectedIds.has(cat.id));
 
-  const nlsDetailList = (config.maNlsSelected || [])
-    .map((code) => {
-      const found = NLS_INDICATOR_LIBRARY.find((n) => n.code === code);
-      return found ? `${found.code} (${found.description})` : code;
-    })
-    .join('; ');
+  const nlsDetailList = isPasteMode
+    ? ''
+    : (config.maNlsSelected || [])
+        .map((code) => {
+          const found = NLS_INDICATOR_LIBRARY.find((n) => n.code === code);
+          return found ? `${found.code} (${found.description})` : code;
+        })
+        .join('; ');
 
   const integrationLines = selectedMetas.map((m) => {
     if (m.id === 'GDDP') {
@@ -303,6 +318,31 @@ function buildLessonPlanPrompt(config: LessonPlanConfig): string {
       ? 'Giáo viên chủ nhiệm (1 tiết dạy trên lớp)'
       : 'Giáo viên dạy nhiều lớp / Môn chuyên (Tin học, Công nghệ, Tiếng Anh, Âm nhạc, Mĩ thuật...)';
 
+  const integrationSectionPrompt = isPasteMode
+    ? customKhgdText
+      ? `NỘI DUNG TÍCH HỢP / LỒNG GHÉP DO GIÁO VIÊN DÁN NGUYÊN VĂN TỪ KẾ HOẠCH GIÁO DỤC (KHGD):
+"""
+${customKhgdText}
+"""
+QUY TẮC BẮT BUỘC TUYỆT ĐỐI 100% VỚI ĐOẠN KHGD TRÊN:
+1) Giữ nguyên chính xác TỪNG MÃ CHỈ BÁO (VD: NLS 1.1.CB1.a, NLS 4.3.CB1.b, AI 3.A1.3, AI (Khung 3439) - 3.C5.1, GDKNS, GDĐP, QPAN, GDBVMT, STEAM...) và nội dung giáo viên đã dán. TUYỆT ĐỐI không tự ý đổi mã sang mã khác hay bỏ sót bất kỳ mã nào (kể cả khi có nhiều hơn 1 mã NLS/AI trong cùng 1 tiết).
+2) Mục I.2.a) (\`nangLucDacThu\`): BẮT BUỘC đưa đầy đủ và chính xác các mã NLS và AI có trong đoạn KHGD trên vào danh sách năng lực.
+3) Mục I.3. (\`giaoDucTichHop\`): Trình bày khớp hoàn toàn từng mục/từng mã với nội dung KHGD giáo viên đã dán.
+4) Bảng III. (\`hoatDongDayHoc\`): Đặt dòng \`noiDungTichHopLongGhep\` (\`Nội dung lồng ghép, tích hợp: ...\`) vào đúng hoạt động phù hợp nhất (Khởi động / Khám phá HĐ1, HĐ2 / Luyện tập HĐ1, HĐ2 / Vận dụng) và triển khai chi tiết \`hoatDongGV\` - \`hoatDongHS\` bám sát gợi ý hoạt động trong đoạn KHGD giáo viên đã dán.`
+      : `NỘI DUNG TÍCH HỢP / LỒNG GHÉP:
+  (Giáo viên để trống ô dán KHGD; trong I.3 ghi đúng 1 dòng "Không có nội dung tích hợp.")`
+    : `NỘI DUNG TÍCH HỢP / LỒNG GHÉP ĐƯỢC CHỌN:
+${
+  integrationLines.length > 0
+    ? integrationLines.join('\n')
+    : '  (Không chọn nội dung tích hợp riêng; trong I.3 ghi rõ "Không có nội dung tích hợp.")'
+}
+${
+  config.noiDungTichHopKhac?.trim()
+    ? `- Yêu cầu tích hợp bổ sung từ giáo viên: ${config.noiDungTichHopKhac.trim()}`
+    : ''
+}`;
+
   return `Hãy soạn Kế hoạch bài dạy (Giáo án 1 tiết = 35 phút) chuẩn mẫu đã ký duyệt của Trường Tiểu học Quang Hưng - Phân hiệu Trực Khang:
 
 THÔNG TIN CHUNG:
@@ -314,17 +354,7 @@ THÔNG TIN CHUNG:
   }
 - Ngày dạy / Lớp: ${config.ngayDayLop.trim() || `Lớp ${config.khoiLop}C; ${config.khoiLop}D`}
 
-NỘI DUNG TÍCH HỢP / LỒNG GHÉP ĐƯỢC CHỌN:
-${
-  integrationLines.length > 0
-    ? integrationLines.join('\n')
-    : '  (Không chọn nội dung tích hợp riêng; trong I.3 ghi rõ "Không có nội dung tích hợp.")'
-}
-${
-  config.noiDungTichHopKhac?.trim()
-    ? `- Yêu cầu tích hợp bổ sung từ giáo viên: ${config.noiDungTichHopKhac.trim()}`
-    : ''
-}
+${integrationSectionPrompt}
 
 HỌC SINH KHUYẾT TẬT HỌC HÒA NHẬP:
 - Tình trạng lớp có HSKT: ${config.coHocSinhKhuyetTat ? 'CÓ học sinh khuyết tật học hòa nhập' : 'Không có thông tin HSKT cụ thể'}
@@ -346,7 +376,11 @@ ${
 
 YÊU CẦU ĐẶC BIỆT:
 - Tổng thời gian của Khởi động + Khám phá (HĐ1 + HĐ2) + Luyện tập (HĐ1 + HĐ2) + Vận dụng PHẢI ĐÚNG BẰNG 35 PHÚT.
-- Nếu có mã Năng lực số (${nlsDetailList || 'không'}), phải ghi rõ mã và mô tả ở CẢ mục \`nangLucDacThu\` và \`giaoDucTichHop\`.`;
+${
+  !isPasteMode
+    ? `- Nếu có mã Năng lực số (${nlsDetailList || 'không'}), phải ghi rõ mã và mô tả ở CẢ mục \`nangLucDacThu\` và \`giaoDucTichHop\`.`
+    : '- Nếu đoạn KHGD giáo viên dán có mã NLS hoặc AI, phải ghi đúng nguyên văn mã đó ở CẢ mục `nangLucDacThu`, `giaoDucTichHop` và bảng `hoatDongDayHoc`.'
+}`;
 }
 
 function normalizeGeneratedLessonPlan(
@@ -404,29 +438,38 @@ function normalizeGeneratedLessonPlan(
   ]);
 
   const fallbackIntegrations: string[] = [];
-  if (
-    config.selectedIntegrations?.includes('GDDP') ||
-    config.noiDungGiaoDucDiaPhuong?.trim()
-  ) {
-    fallbackIntegrations.push(
-      `- Tích hợp Giáo dục địa phương (Mức độ ${config.mucDoGddp || 'Liên hệ'}): ${
-        config.noiDungGiaoDucDiaPhuong?.trim() ||
-        'Liên hệ thực tế quê hương Quang Hưng - Trực Khang gắn với nội dung bài học.'
-      }`
-    );
-  }
-  if (config.maNlsSelected && config.maNlsSelected.length > 0) {
-    config.maNlsSelected.forEach((code) => {
-      const meta = NLS_INDICATOR_LIBRARY.find((n) => n.code === code);
+  const customKhgdText = config.customKhgdIntegrationText?.trim() || '';
+  if (customKhgdText) {
+    customKhgdText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .forEach((line) => fallbackIntegrations.push(line));
+  } else if (config.integrationMode !== 'paste_khgd') {
+    if (
+      config.selectedIntegrations?.includes('GDDP') ||
+      config.noiDungGiaoDucDiaPhuong?.trim()
+    ) {
       fallbackIntegrations.push(
-        `- ${code}: ${meta?.description || 'Phát triển năng lực số phù hợp cấp Tiểu học.'}`
+        `- Tích hợp Giáo dục địa phương (Mức độ ${config.mucDoGddp || 'Liên hệ'}): ${
+          config.noiDungGiaoDucDiaPhuong?.trim() ||
+          'Liên hệ thực tế quê hương Quang Hưng - Trực Khang gắn với nội dung bài học.'
+        }`
       );
-    });
-  }
-  if (config.selectedIntegrations?.includes('STEM')) {
-    fallbackIntegrations.push(
-      `- Tích hợp STEAM (${config.steamStep || 'Theo quy trình kĩ thuật'}): Vận dụng kiến thức tạo sản phẩm thực tiễn.`
-    );
+    }
+    if (config.maNlsSelected && config.maNlsSelected.length > 0) {
+      config.maNlsSelected.forEach((code) => {
+        const meta = NLS_INDICATOR_LIBRARY.find((n) => n.code === code);
+        fallbackIntegrations.push(
+          `- ${code}: ${meta?.description || 'Phát triển năng lực số phù hợp cấp Tiểu học.'}`
+        );
+      });
+    }
+    if (config.selectedIntegrations?.includes('STEM')) {
+      fallbackIntegrations.push(
+        `- Tích hợp STEAM (${config.steamStep || 'Theo quy trình kĩ thuật'}): Vận dụng kiến thức tạo sản phẩm thực tiễn.`
+      );
+    }
   }
 
   const normalizedHskt =
@@ -628,6 +671,7 @@ export async function saveLessonPlanToSystem(params: {
     'cv-2345',
     config.monHoc.toLowerCase().slice(0, 40),
     `khoi-${config.khoiLop}`,
+    ...(config.customKhgdIntegrationText?.trim() ? ['khgd-tich-hop'] : []),
     ...(config.selectedIntegrations || []).slice(0, 4).map((c) => c.toLowerCase()),
   ].slice(0, 10);
 
