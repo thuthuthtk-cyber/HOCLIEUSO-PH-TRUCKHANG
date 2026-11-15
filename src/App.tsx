@@ -3,6 +3,7 @@ import { useKhoHocLieu } from './hooks/useKhoHocLieu';
 import { ToastProvider } from './components/ToastContext';
 import { Navbar } from './components/Navbar';
 import { MainWorkspace } from './components/MainWorkspace';
+import { GeminiConfigModal } from './components/GeminiConfigModal';
 import { LoginView } from './views/LoginView';
 import { PublicGamePlayerView } from './views/PublicGamePlayerView';
 import {
@@ -47,8 +48,14 @@ function MainApplication() {
         pendingApprovalCount={state.pendingApprovalCount}
         onNavigate={state.navigateTo}
         onSignOut={state.signOutUser}
+        onOpenGeminiConfig={() => state.setGeminiConfigOpen(true)}
       />
       <MainWorkspace state={state} />
+      <GeminiConfigModal
+        open={state.geminiConfigOpen}
+        onClose={() => state.setGeminiConfigOpen(false)}
+        profile={state.profile}
+      />
     </div>
   );
 }

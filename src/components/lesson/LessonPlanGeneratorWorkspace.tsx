@@ -1,16 +1,13 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   AlertCircle,
   BookOpen,
   CheckCircle2,
-  CheckSquare,
   ClipboardList,
-  ClipboardPaste,
   Clock,
   Cpu,
   Download,
   Edit3,
-  Eraser,
   HeartHandshake,
   Layers,
   Loader2,
@@ -31,7 +28,6 @@ import {
   STEAM_STEPS,
   type GeneratedLessonPlan,
   type IntegrationCategoryId,
-  type IntegrationInputMode,
   type IntegrationMucDo,
   type LessonPlanActivityStep,
   type LessonPlanConfig,
@@ -132,25 +128,20 @@ export function LessonPlanGeneratorWorkspace({
     'Sáng thứ Hai, 16/11/2026 - Lớp: 5D (tiết 3); 5C (tiết 4)'
   );
 
-  // Chế độ nhập nội dung tích hợp / lồng ghép
-  const [integrationMode, setIntegrationMode] = useState<IntegrationInputMode>('paste_khgd');
-  const [customKhgdIntegrationText, setCustomKhgdIntegrationText] = useState<string>('');
-  const khgdTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  // Khung 1: GDĐP (Chế độ 2)
+  // Khung 1: GDĐP
   const [enableGddp, setEnableGddp] = useState<boolean>(true);
   const [mucDoGddp, setMucDoGddp] = useState<IntegrationMucDo>('Liên hệ');
   const [noiDungGddp, setNoiDungGddp] = useState<string>(
     'Liên hệ cảnh đẹp, truyền thống quê hương Trường TH Quang Hưng - Phân hiệu Trực Khang gắn với nội dung bài học.'
   );
 
-  // Khung 2: Năng lực số & AI (Chế độ 2)
+  // Khung 2: Năng lực số & AI
   const [enableNls, setEnableNls] = useState<boolean>(true);
   const [showAllNls, setShowAllNls] = useState<boolean>(false);
   const [maNlsSelected, setMaNlsSelected] = useState<string[]>(['NLS 3.1.CB2.a']);
   const [chiTietNlsAi, setChiTietNlsAi] = useState<string>('');
 
-  // Khung 3: Nội dung tích hợp khác (05.2 - Chế độ 2)
+  // Khung 3: Nội dung tích hợp khác (05.2)
   const [otherIntegrations, setOtherIntegrations] = useState<IntegrationCategoryId[]>([]);
   const [steamStep, setSteamStep] = useState<string>(STEAM_STEPS[3]);
   const [noiDungTichHopKhac, setNoiDungTichHopKhac] = useState<string>('');
@@ -233,25 +224,10 @@ export function LessonPlanGeneratorWorkspace({
     });
   }
 
-  function handleInsertKhgdPrefix(prefix: string) {
-    setIntegrationMode('paste_khgd');
-    setCustomKhgdIntegrationText((prev) => {
-      const trimmedEnd = prev.replace(/\s+$/, '');
-      if (!trimmedEnd) return prefix;
-      return `${trimmedEnd}\n${prefix}`;
-    });
-    requestAnimationFrame(() => {
-      khgdTextareaRef.current?.focus();
-    });
-  }
-
   function buildConfig(): LessonPlanConfig {
-    const isPasteMode = integrationMode === 'paste_khgd';
-    const selectedIntegrations: IntegrationCategoryId[] = isPasteMode
-      ? []
-      : [...otherIntegrations];
-    if (!isPasteMode && enableGddp) selectedIntegrations.push('GDDP');
-    if (!isPasteMode && enableNls) selectedIntegrations.push('CDS_NLS_AI');
+    const selectedIntegrations: IntegrationCategoryId[] = [...otherIntegrations];
+    if (enableGddp) selectedIntegrations.push('GDDP');
+    if (enableNls) selectedIntegrations.push('CDS_NLS_AI');
 
     return {
       loaiGiaoVien,
@@ -265,15 +241,13 @@ export function LessonPlanGeneratorWorkspace({
       boSach,
       tenBaiHoc: tenBaiHoc.trim(),
       ngayDayLop: ngayDayLop.trim(),
-      integrationMode,
-      customKhgdIntegrationText: isPasteMode ? customKhgdIntegrationText.trim() : '',
       selectedIntegrations,
       mucDoGddp,
-      noiDungGiaoDucDiaPhuong: !isPasteMode && enableGddp ? noiDungGddp.trim() : '',
-      maNlsSelected: !isPasteMode && enableNls ? maNlsSelected : [],
-      chiTietNlsAi: !isPasteMode && enableNls ? chiTietNlsAi.trim() : '',
-      steamStep: !isPasteMode && otherIntegrations.includes('STEM') ? steamStep : '',
-      noiDungTichHopKhac: !isPasteMode ? noiDungTichHopKhac.trim() : '',
+      noiDungGiaoDucDiaPhuong: enableGddp ? noiDungGddp.trim() : '',
+      maNlsSelected: enableNls ? maNlsSelected : [],
+      chiTietNlsAi: enableNls ? chiTietNlsAi.trim() : '',
+      steamStep: otherIntegrations.includes('STEM') ? steamStep : '',
+      noiDungTichHopKhac: noiDungTichHopKhac.trim(),
       coHocSinhKhuyetTat,
       ghiChuHSKT: coHocSinhKhuyetTat ? ghiChuHSKT.trim() : '',
     };
@@ -794,330 +768,209 @@ export function LessonPlanGeneratorWorkspace({
             </div>
           </div>
 
-          {/* KHUNG THIẾT LẬP NỘI DUNG TÍCH HỢP / LỒNG GHÉP (2 CHẾ ĐỘ LINH HOẠT) */}
-          <div className="rounded-2xl border-2 border-teal-200 bg-teal-50/30 p-4 space-y-3.5">
+          {/* KHUNG 1: GIÁO DỤC ĐỊA PHƯƠNG */}
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-teal-700 shrink-0" />
-                <span className="text-sm font-extrabold text-teal-950">
-                  Thiết lập Nội dung tích hợp / lồng ghép
+                <MapPin className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span className="text-sm font-extrabold text-emerald-950">
+                  1. Giáo dục địa phương / Văn hóa địa phương
                 </span>
               </div>
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-teal-100 text-teal-800">
-                2 chế độ linh hoạt
-              </span>
+              <input
+                type="checkbox"
+                checked={enableGddp}
+                onChange={(e) => setEnableGddp(e.target.checked)}
+                aria-label="Bật tích hợp Giáo dục địa phương"
+                className="w-4 h-4 rounded border-emerald-400 text-emerald-700 focus:ring-emerald-600"
+              />
             </div>
 
-            {/* 2 nút chuyển chế độ */}
-            <div className="grid grid-cols-1 gap-2">
-              <button
-                type="button"
-                onClick={() => setIntegrationMode('paste_khgd')}
-                className={`flex items-start gap-2.5 p-3 rounded-xl border text-left transition-all ${
-                  integrationMode === 'paste_khgd'
-                    ? 'border-teal-600 bg-white ring-2 ring-teal-600/20 shadow-xs'
-                    : 'border-slate-200 bg-white/70 hover:bg-white'
-                }`}
-              >
-                <ClipboardPaste
-                  className={`w-4 h-4 mt-0.5 shrink-0 ${
-                    integrationMode === 'paste_khgd' ? 'text-teal-700' : 'text-slate-500'
-                  }`}
-                />
-                <div>
-                  <div className="text-xs font-extrabold text-slate-900">
-                    📋 Dán trực tiếp từ Kế hoạch giáo dục (KHGD) đã xây dựng
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">
-                    Ưu tiên · Giữ nguyên 100% mã NLS, mã AI và nội dung tích hợp của khối/trường
-                  </div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIntegrationMode('preset_list')}
-                className={`flex items-start gap-2.5 p-3 rounded-xl border text-left transition-all ${
-                  integrationMode === 'preset_list'
-                    ? 'border-teal-600 bg-white ring-2 ring-teal-600/20 shadow-xs'
-                    : 'border-slate-200 bg-white/70 hover:bg-white'
-                }`}
-              >
-                <CheckSquare
-                  className={`w-4 h-4 mt-0.5 shrink-0 ${
-                    integrationMode === 'preset_list' ? 'text-teal-700' : 'text-slate-500'
-                  }`}
-                />
-                <div>
-                  <div className="text-xs font-extrabold text-slate-900">
-                    ☑️ Chọn từ danh sách gợi ý sẵn (Dành cho GV chưa có sẵn nội dung tích hợp)
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">
-                    Chọn nhanh GDĐP, Năng lực số TT 02/2025 và các chuyên đề Bảng 05.2
-                  </div>
-                </div>
-              </button>
-            </div>
-
-            {integrationMode === 'paste_khgd' ? (
-              <div className="bg-white rounded-xl border border-teal-200 p-3.5 space-y-2.5">
-                <label className="block text-xs font-extrabold text-slate-900 leading-snug">
-                  Dán nguyên văn cột &apos;Nội dung điều chỉnh, bổ sung / Tích hợp&apos; từ Kế hoạch giáo dục (KHGD) của thầy/cô vào đây:
-                </label>
-
-                {/* Nút chèn nhanh tiền tố */}
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    { label: '+ Tích hợp NLS:', prefix: '- Tích hợp NLS: ' },
-                    { label: '+ Tích hợp AI:', prefix: '- Tích hợp AI (Khung 3439) - ' },
-                    { label: '+ Tích hợp GDĐP:', prefix: '- Tích hợp GDĐP: ' },
-                    { label: '+ Tích hợp KNS:', prefix: '- Tích hợp KNS: ' },
-                    { label: '+ Tích hợp STEAM:', prefix: '- Tích hợp STEAM: ' },
-                    { label: '+ Tích hợp QPAN/ATGT:', prefix: '- Tích hợp QPAN/ATGT: ' },
-                  ].map((item) => (
+            {enableGddp && (
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-emerald-900">Mức độ:</span>
+                  {(['Liên hệ', 'Bộ phận', 'Toàn phần'] as IntegrationMucDo[]).map((level) => (
                     <button
-                      key={item.label}
+                      key={level}
                       type="button"
-                      onClick={() => handleInsertKhgdPrefix(item.prefix)}
-                      className="text-[11px] font-bold px-2 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 transition-colors"
+                      onClick={() => setMucDoGddp(level)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
+                        mucDoGddp === level
+                          ? 'bg-emerald-700 text-white border-emerald-700'
+                          : 'bg-white text-emerald-900 border-emerald-200 hover:bg-emerald-100'
+                      }`}
                     >
-                      [{item.label}]
+                      {level}
                     </button>
                   ))}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCustomKhgdIntegrationText('');
-                      requestAnimationFrame(() => khgdTextareaRef.current?.focus());
-                    }}
-                    className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors"
-                  >
-                    <Eraser className="w-3 h-3" />
-                    [Xoá trắng]
-                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {GDDP_QUICK_CHIPS.map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => handleAppendGddpChip(chip)}
+                      className="text-[11px] px-2 py-1 rounded-lg bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-200 text-left transition-colors"
+                    >
+                      + {chip}
+                    </button>
+                  ))}
                 </div>
 
                 <textarea
-                  ref={khgdTextareaRef}
-                  rows={6}
-                  value={customKhgdIntegrationText}
-                  onChange={(e) => setCustomKhgdIntegrationText(e.target.value)}
-                  placeholder={`Ví dụ copy từ KHGD dán vào:\n- Tích hợp NLS: NLS 4.3.CB1.b\n- Tích hợp AI (Khung 3439) - 3.A1.1: Nhận biết AI hỗ trợ tính toán nhanh...\n- Tích hợp KNS: Giữ khoảng cách, thời gian xem ti vi hợp lí...\n- Tích hợp GDĐP: Giới thiệu cảnh đẹp, địa danh quê hương em...`}
-                  className="w-full px-3 py-2.5 rounded-xl border border-teal-300 bg-slate-50/40 text-xs text-slate-900 leading-relaxed focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-600"
+                  rows={2}
+                  value={noiDungGddp}
+                  onChange={(e) => setNoiDungGddp(e.target.value)}
+                  placeholder="Nhập nội dung liên hệ quê hương Quang Hưng - Trực Khang..."
+                  className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-600"
                 />
-
-                <p className="text-[11px] italic text-teal-900 leading-relaxed bg-teal-50/70 rounded-lg px-2.5 py-2 border border-teal-100">
-                  Khi thầy/cô dán nội dung vào ô này, AI sẽ tuân thủ 100% đúng mã NLS, mã AI và nội dung tích hợp thầy/cô đã dán để giáo án khớp tuyệt đối với Kế hoạch giáo dục của khối/nhà trường.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3.5 pt-1">
-                {/* KHUNG 1: GIÁO DỤC ĐỊA PHƯƠNG */}
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <MapPin className="w-4 h-4 text-emerald-700 shrink-0" />
-                      <span className="text-sm font-extrabold text-emerald-950">
-                        1. Giáo dục địa phương / Văn hóa địa phương
-                      </span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={enableGddp}
-                      onChange={(e) => setEnableGddp(e.target.checked)}
-                      aria-label="Bật tích hợp Giáo dục địa phương"
-                      className="w-4 h-4 rounded border-emerald-400 text-emerald-700 focus:ring-emerald-600"
-                    />
-                  </div>
-
-                  {enableGddp && (
-                    <div className="space-y-2.5">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-bold text-emerald-900">Mức độ:</span>
-                        {(['Liên hệ', 'Bộ phận', 'Toàn phần'] as IntegrationMucDo[]).map((level) => (
-                          <button
-                            key={level}
-                            type="button"
-                            onClick={() => setMucDoGddp(level)}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
-                              mucDoGddp === level
-                                ? 'bg-emerald-700 text-white border-emerald-700'
-                                : 'bg-white text-emerald-900 border-emerald-200 hover:bg-emerald-100'
-                            }`}
-                          >
-                            {level}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="flex flex-wrap gap-1.5">
-                        {GDDP_QUICK_CHIPS.map((chip) => (
-                          <button
-                            key={chip}
-                            type="button"
-                            onClick={() => handleAppendGddpChip(chip)}
-                            className="text-[11px] px-2 py-1 rounded-lg bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-200 text-left transition-colors"
-                          >
-                            + {chip}
-                          </button>
-                        ))}
-                      </div>
-
-                      <textarea
-                        rows={2}
-                        value={noiDungGddp}
-                        onChange={(e) => setNoiDungGddp(e.target.value)}
-                        placeholder="Nhập nội dung liên hệ quê hương Quang Hưng - Trực Khang..."
-                        className="w-full px-3 py-2 rounded-xl border border-emerald-200 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* KHUNG 2: NĂNG LỰC SỐ & AI (TT 02/2025) */}
-                <div className="rounded-2xl border border-sky-200 bg-sky-50/40 p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Cpu className="w-4 h-4 text-sky-700 shrink-0" />
-                      <span className="text-sm font-extrabold text-sky-950">
-                        2. Năng lực số (TT 02/2025) & Trí tuệ nhân tạo (AI)
-                      </span>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={enableNls}
-                      onChange={(e) => setEnableNls(e.target.checked)}
-                      aria-label="Bật tích hợp Năng lực số và AI"
-                      className="w-4 h-4 rounded border-sky-400 text-sky-700 focus:ring-sky-600"
-                    />
-                  </div>
-
-                  {enableNls && (
-                    <div className="space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-sky-900">
-                          Chọn chỉ báo năng lực số phù hợp (Khối {khoiLop}):
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setShowAllNls((v) => !v)}
-                          className="text-[11px] font-bold text-sky-700 hover:underline"
-                        >
-                          {showAllNls ? 'Lọc theo khối' : 'Xem tất cả 8 mã'}
-                        </button>
-                      </div>
-
-                      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                        {displayedNlsOptions.map((opt) => {
-                          const checked = maNlsSelected.includes(opt.code);
-                          return (
-                            <label
-                              key={opt.code}
-                              className={`flex items-start gap-2 p-2 rounded-xl border cursor-pointer transition-colors ${
-                                checked
-                                  ? 'bg-white border-sky-500 ring-1 ring-sky-500'
-                                  : 'bg-white/70 border-sky-100 hover:bg-white'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleNlsCode(opt.code)}
-                                className="mt-0.5 w-3.5 h-3.5 rounded border-sky-400 text-sky-700"
-                              />
-                              <div className="min-w-0">
-                                <div className="text-xs font-extrabold text-slate-900">
-                                  {opt.code} · {opt.label}
-                                </div>
-                                <div className="text-[11px] text-slate-600 leading-snug">
-                                  {opt.description}
-                                </div>
-                              </div>
-                            </label>
-                          );
-                        })}
-                      </div>
-
-                      <textarea
-                        rows={2}
-                        value={chiTietNlsAi}
-                        onChange={(e) => setChiTietNlsAi(e.target.value)}
-                        placeholder="Gợi ý thêm thao tác số/AI trong tiết học (không bắt buộc)..."
-                        className="w-full px-3 py-2 rounded-xl border border-sky-200 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-600"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* KHUNG 3: CÁC NỘI DUNG TÍCH HỢP KHÁC (05.2) */}
-                <div className="rounded-2xl border border-indigo-200 bg-indigo-50/30 p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-indigo-700 shrink-0" />
-                    <span className="text-sm font-extrabold text-indigo-950">
-                      3. Các nội dung tích hợp khác (Bảng 05.2)
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {otherIntegrationMetas.map((meta) => {
-                      const checked = otherIntegrations.includes(meta.id);
-                      return (
-                        <label
-                          key={meta.id}
-                          className={`flex items-start gap-2 p-2 rounded-xl border cursor-pointer transition-colors ${
-                            checked
-                              ? 'bg-white border-indigo-500 ring-1 ring-indigo-500'
-                              : 'bg-white/70 border-indigo-100 hover:bg-white'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleOtherIntegration(meta.id)}
-                            className="mt-0.5 w-3.5 h-3.5 rounded border-indigo-400 text-indigo-700"
-                          />
-                          <div className="min-w-0">
-                            <div className="text-xs font-bold text-slate-900 leading-tight">
-                              {meta.tenNhom}
-                            </div>
-                            <div className="text-[10px] text-slate-500 mt-0.5">
-                              {meta.canCuPhapLy}
-                            </div>
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-
-                  {otherIntegrations.includes('STEM') && (
-                    <div className="bg-white rounded-xl border border-indigo-200 p-2.5">
-                      <label className="block text-xs font-bold text-indigo-900 mb-1">
-                        Bước quy trình STEAM lồng ghép:
-                      </label>
-                      <select
-                        value={steamStep}
-                        onChange={(e) => setSteamStep(e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 text-xs font-semibold text-slate-800"
-                      >
-                        {STEAM_STEPS.map((step) => (
-                          <option key={step} value={step}>
-                            {step}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  <textarea
-                    rows={2}
-                    value={noiDungTichHopKhac}
-                    onChange={(e) => setNoiDungTichHopKhac(e.target.value)}
-                    placeholder="Ghi chú thêm nội dung lồng ghép riêng của bài (nếu có)..."
-                    className="w-full px-3 py-2 rounded-xl border border-indigo-200 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
-                  />
-                </div>
               </div>
             )}
+          </div>
+
+          {/* KHUNG 2: NĂNG LỰC SỐ & AI (TT 02/2025) */}
+          <div className="rounded-2xl border border-sky-200 bg-sky-50/40 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-sky-700 shrink-0" />
+                <span className="text-sm font-extrabold text-sky-950">
+                  2. Năng lực số (TT 02/2025) & Trí tuệ nhân tạo (AI)
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={enableNls}
+                onChange={(e) => setEnableNls(e.target.checked)}
+                aria-label="Bật tích hợp Năng lực số và AI"
+                className="w-4 h-4 rounded border-sky-400 text-sky-700 focus:ring-sky-600"
+              />
+            </div>
+
+            {enableNls && (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-sky-900">
+                    Chọn chỉ báo năng lực số phù hợp (Khối {khoiLop}):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAllNls((v) => !v)}
+                    className="text-[11px] font-bold text-sky-700 hover:underline"
+                  >
+                    {showAllNls ? 'Lọc theo khối' : 'Xem tất cả 8 mã'}
+                  </button>
+                </div>
+
+                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                  {displayedNlsOptions.map((opt) => {
+                    const checked = maNlsSelected.includes(opt.code);
+                    return (
+                      <label
+                        key={opt.code}
+                        className={`flex items-start gap-2 p-2 rounded-xl border cursor-pointer transition-colors ${
+                          checked
+                            ? 'bg-white border-sky-500 ring-1 ring-sky-500'
+                            : 'bg-white/70 border-sky-100 hover:bg-white'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleNlsCode(opt.code)}
+                          className="mt-0.5 w-3.5 h-3.5 rounded border-sky-400 text-sky-700"
+                        />
+                        <div className="min-w-0">
+                          <div className="text-xs font-extrabold text-slate-900">
+                            {opt.code} · {opt.label}
+                          </div>
+                          <div className="text-[11px] text-slate-600 leading-snug">
+                            {opt.description}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <textarea
+                  rows={2}
+                  value={chiTietNlsAi}
+                  onChange={(e) => setChiTietNlsAi(e.target.value)}
+                  placeholder="Gợi ý thêm thao tác số/AI trong tiết học (không bắt buộc)..."
+                  className="w-full px-3 py-2 rounded-xl border border-sky-200 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-600"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* KHUNG 3: CÁC NỘI DUNG TÍCH HỢP KHÁC (05.2) */}
+          <div className="rounded-2xl border border-indigo-200 bg-indigo-50/30 p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-indigo-700 shrink-0" />
+              <span className="text-sm font-extrabold text-indigo-950">
+                3. Các nội dung tích hợp khác (Bảng 05.2)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+              {otherIntegrationMetas.map((meta) => {
+                const checked = otherIntegrations.includes(meta.id);
+                return (
+                  <label
+                    key={meta.id}
+                    className={`flex items-start gap-2 p-2 rounded-xl border cursor-pointer transition-colors ${
+                      checked
+                        ? 'bg-white border-indigo-500 ring-1 ring-indigo-500'
+                        : 'bg-white/70 border-indigo-100 hover:bg-white'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleOtherIntegration(meta.id)}
+                      className="mt-0.5 w-3.5 h-3.5 rounded border-indigo-400 text-indigo-700"
+                    />
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-slate-900 leading-tight">
+                        {meta.tenNhom}
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">
+                        {meta.canCuPhapLy}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            {otherIntegrations.includes('STEM') && (
+              <div className="bg-white rounded-xl border border-indigo-200 p-2.5">
+                <label className="block text-xs font-bold text-indigo-900 mb-1">
+                  Bước quy trình STEAM lồng ghép:
+                </label>
+                <select
+                  value={steamStep}
+                  onChange={(e) => setSteamStep(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-indigo-200 text-xs font-semibold text-slate-800"
+                >
+                  {STEAM_STEPS.map((step) => (
+                    <option key={step} value={step}>
+                      {step}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <textarea
+              rows={2}
+              value={noiDungTichHopKhac}
+              onChange={(e) => setNoiDungTichHopKhac(e.target.value)}
+              placeholder="Ghi chú thêm nội dung lồng ghép riêng của bài (nếu có)..."
+              className="w-full px-3 py-2 rounded-xl border border-indigo-200 bg-white text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+            />
           </div>
 
           {/* KHUNG 4: HỌC SINH KHUYẾT TẬT HỌC HÒA NHẬP */}
