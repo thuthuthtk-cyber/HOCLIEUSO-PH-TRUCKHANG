@@ -16,7 +16,7 @@ import { usePublicGameShareCode } from './utils/shareCode';
 function MainApplication() {
   const state = useKhoHocLieu();
 
-  if (!state.authReady || (state.authUser && state.profileLoading)) {
+  if (!state.isAuthenticated && (!state.authReady || (state.authUser && state.profileLoading))) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 gap-3">
         <div className="w-10 h-10 rounded-xl bg-teal-700 text-white flex items-center justify-center animate-pulse">
@@ -27,9 +27,12 @@ function MainApplication() {
     );
   }
 
-  if (!state.authUser) return <LoginView />;
+  if (!state.isAuthenticated || !state.currentUser) return <LoginView />;
   if (!state.profile) {
-    return <MissingProfileGate authUser={state.authUser} onRefresh={state.refreshProfile} />;
+    if (state.authUser) {
+      return <MissingProfileGate authUser={state.authUser} onRefresh={state.refreshProfile} />;
+    }
+    return <LoginView />;
   }
   if (state.profile.biKhoa) return <LockedAccountGate profile={state.profile} />;
   if (state.profile.yeuCauDoiMatKhau) {

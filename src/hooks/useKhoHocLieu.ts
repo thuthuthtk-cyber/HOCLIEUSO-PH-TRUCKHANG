@@ -24,20 +24,30 @@ import {
   type SubjectItem,
   type UserProfile,
 } from '../types/hocLieu';
+import {
+  buildSsoSessionFromPayload,
+  clearSsoSessionFromStorage,
+  detectInitialSsoSession,
+  saveSsoSessionToStorage,
+  type SsoSession,
+} from '../utils/ssoAuth';
 import { useToast } from '../components/ToastContext';
 
 export function useKhoHocLieu() {
   const { showToast, showFirebaseAlert } = useToast();
 
+  const [ssoSession, setSsoSession] = useState<SsoSession | null>(() =>
+    detectInitialSsoSession()
+  );
   const [authReady, setAuthReady] = useState(false);
   const [authUser, setAuthUser] = useState<User | null>(null);
-  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileRefreshTick, setProfileRefreshTick] = useState(0);
 
   const [view, setView] = useState<AppView>('library');
   const [materials, setMaterials] = useState<LearningMaterial[]>([]);
-  const [materialsLoading, setMaterialsLoading] = useState(true);
+  const [materialsLoading, setMaterialsLoading] = useState(false);
   const [subjects, setSubjects] = useState<SubjectItem[]>([]);
   const [departments, setDepartments] = useState<DepartmentItem[]>([]);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
@@ -52,6 +62,36 @@ export function useKhoHocLieu() {
   const autoSeededRef = useRef(false);
 
   useEffect(() => {
+    function handleSsoMessage(event: MessageEvent) {
+      const data = event.data as Record<string, unknown> | null | undefined;
+      if (!data || typeof data !== 'object') return;
+      if (data.type !== 'PK_TRUC_KHANG_SSO_LOGIN') return;
+
+      const rawUser =
+        (data.user && typeof data.user === 'object'
+          ? (data.user as Record<string, unknown>)
+          : null) ||
+        (data.payload && typeof data.payload === 'object'
+          ? (data.payload as Record<string, unknown>)
+          : null) ||
+        (data.teacher && typeof data.teacher === 'object'
+          ? (data.teacher as Record<string, unknown>)
+          : null) ||
+        (data.data && typeof data.data === 'object'
+          ? (data.data as Record<string, unknown>)
+          : null) ||
+        data;
+
+      const nextSession = buildSsoSessionFromPayload(rawUser, 'post_message');
+      saveSsoSessionToStorage(nextSession);
+      setSsoSession(nextSession);
+    }
+
+    window.addEventListener('message', handleSsoMessage);
+    return () => window.removeEventListener('message', handleSsoMessage);
+  }, []);
+
+  useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       setAuthReady(true);
@@ -59,6 +99,7 @@ export function useKhoHocLieu() {
         setProfile(null);
         setProfileLoading(false);
         setMaterials([]);
+        setMaterialsLoading(false);
         setAllUsers([]);
         autoSeededRef.current = false;
       }
@@ -67,7 +108,10 @@ export function useKhoHocLieu() {
   }, []);
 
   useEffect(() => {
-    if (!authUser) return;
+    if (!authUser) {
+      setProfileLoading(false);
+      return;
+    }
     setProfileLoading(true);
     return subscribeUserProfile(
       authUser.uid,
@@ -80,34 +124,41 @@ export function useKhoHocLieu() {
   }, [authUser, profileRefreshTick]);
 
   useEffect(() => {
-    if (!profile || profile.biKhoa || profile.yeuCauDoiMatKhau) return;
+    if (!authUser || !profile || profile.biKhoa || profile.yeuCauDoiMatKhau) return;
     if (profile.vaiTro === 'quanTri' && !autoSeededRef.current) {
       autoSeededRef.current = true;
       void seedDefaultCatalogs();
     }
-  }, [profile]);
+  }, [authUser, profile]);
 
   useEffect(() => {
-    if (!profile || profile.biKhoa || profile.yeuCauDoiMatKhau) return;
+    if (!authUser || !profile || profile.biKhoa || profile.yeuCauDoiMatKhau) return;
     const unsubSub = subscribeSubjects(setSubjects);
     const unsubDept = subscribeDepartments(setDepartments);
     return () => {
       unsubSub();
       unsubDept();
     };
-  }, [profile]);
+  }, [authUser, profile]);
 
   useEffect(() => {
-    if (!profile || profile.biKhoa || profile.yeuCauDoiMatKhau || profile.vaiTro !== 'quanTri') {
+    if (
+      !authUser ||
+      !profile ||
+      profile.biKhoa ||
+      profile.yeuCauDoiMatKhau ||
+      profile.vaiTro !== 'quanTri'
+    ) {
       setAllUsers([]);
       return;
     }
     return subscribeAllUsers(setAllUsers);
-  }, [profile]);
+  }, [authUser, profile]);
 
   useEffect(() => {
-    if (!profile || profile.biKhoa || profile.yeuCauDoiMatKhau) {
+    if (!authUser || !profile || profile.biKhoa || profile.yeuCauDoiMatKhau) {
       setMaterials([]);
+      setMaterialsLoading(false);
       return;
     }
     setMaterialsLoading(true);
@@ -119,7 +170,11 @@ export function useKhoHocLieu() {
       },
       () => setMaterialsLoading(false)
     );
-  }, [profile]);
+  }, [authUser, profile]);
+
+  const currentUser = authUser ?? ssoSession?.currentUser ?? null;
+  const effectiveProfile = profile ?? (!authUser ? ssoSession?.profile ?? null : null);
+  const isAuthenticated = Boolean(currentUser && effectiveProfile);
 
   const effectiveSubjects: SubjectItem[] = useMemo(() => {
     if (subjects.length > 0) return subjects;
@@ -149,22 +204,22 @@ export function useKhoHocLieu() {
   }, [departments]);
 
   const myMaterials = useMemo(() => {
-    if (!profile) return [];
-    return materials.filter((m) => m.nguoiDangUid === profile.uid);
-  }, [materials, profile]);
+    if (!effectiveProfile) return [];
+    return materials.filter((m) => m.nguoiDangUid === effectiveProfile.uid);
+  }, [materials, effectiveProfile]);
 
   const pendingApprovalCount = useMemo(() => {
-    if (!profile) return 0;
-    if (profile.vaiTro === 'quanTri') {
+    if (!effectiveProfile) return 0;
+    if (effectiveProfile.vaiTro === 'quanTri') {
       return materials.filter((m) => m.trangThai === 'choDuyet').length;
     }
-    if (profile.vaiTro === 'toTruong') {
+    if (effectiveProfile.vaiTro === 'toTruong') {
       return materials.filter(
-        (m) => m.trangThai === 'choDuyet' && m.toKhoi === profile.toKhoi
+        (m) => m.trangThai === 'choDuyet' && m.toKhoi === effectiveProfile.toKhoi
       ).length;
     }
     return 0;
-  }, [materials, profile]);
+  }, [materials, effectiveProfile]);
 
   const activePreviewMaterial = useMemo(() => {
     if (!previewMaterial) return null;
@@ -227,13 +282,22 @@ export function useKhoHocLieu() {
     }
   }
 
+  async function signOutUser() {
+    clearSsoSessionFromStorage();
+    setSsoSession(null);
+    await signOut(auth);
+  }
+
   return {
     authReady,
     authUser,
+    currentUser,
+    isAuthenticated,
+    isSsoSession: Boolean(!authUser && ssoSession),
     profileLoading,
-    profile,
+    profile: effectiveProfile,
     refreshProfile: () => setProfileRefreshTick((t) => t + 1),
-    signOutUser: () => signOut(auth),
+    signOutUser,
     view,
     setView,
     navigateTo,
