@@ -24,7 +24,9 @@ import {
   type SubjectItem,
   type UserProfile,
 } from '../types/hocLieu';
+import { normalizeVietnamese } from '../lib/utils';
 import {
+  attemptSilentFirebaseAuthForSso,
   buildSsoSessionFromPayload,
   clearSsoSessionFromStorage,
   detectInitialSsoSession,
@@ -60,6 +62,7 @@ export function useKhoHocLieu() {
   const [geminiConfigOpen, setGeminiConfigOpen] = useState(false);
 
   const autoSeededRef = useRef(false);
+  const silentAuthAttemptedRef = useRef(false);
 
   useEffect(() => {
     function handleSsoMessage(event: MessageEvent) {
@@ -95,20 +98,26 @@ export function useKhoHocLieu() {
     const unsub = onAuthStateChanged(auth, (user) => {
       setAuthUser(user);
       setAuthReady(true);
-      if (!user) {
+      if (!user || user.isAnonymous) {
         setProfile(null);
         setProfileLoading(false);
-        setMaterials([]);
-        setMaterialsLoading(false);
-        setAllUsers([]);
         autoSeededRef.current = false;
       }
     });
     return () => unsub();
   }, []);
 
+  const isRealAuthUser = Boolean(authUser && !authUser.isAnonymous);
+
+  // Thử đăng nhập Firebase Auth ngầm cho phiên SSO trong iframe (không chặn giao diện nếu dự án chưa bật Anonymous Auth)
   useEffect(() => {
-    if (!authUser) {
+    if (!authReady || authUser || !ssoSession || silentAuthAttemptedRef.current) return;
+    silentAuthAttemptedRef.current = true;
+    void attemptSilentFirebaseAuthForSso(auth, ssoSession.currentUser.ssoToken);
+  }, [authReady, authUser, ssoSession]);
+
+  useEffect(() => {
+    if (!isRealAuthUser || !authUser) {
       setProfileLoading(false);
       return;
     }
@@ -121,60 +130,136 @@ export function useKhoHocLieu() {
       },
       () => setProfileLoading(false)
     );
-  }, [authUser, profileRefreshTick]);
+  }, [isRealAuthUser, authUser, profileRefreshTick]);
+
+  // Đồng bộ danh sách người dùng để ánh xạ hồ sơ thật (UID, tổ khối) cho giáo viên SSO
+  const activeSsoBaseProfile = !isRealAuthUser ? ssoSession?.profile ?? null : null;
+  const canLoadCatalogs = Boolean(
+    (isRealAuthUser && profile && !profile.biKhoa && !profile.yeuCauDoiMatKhau) ||
+      activeSsoBaseProfile
+  );
 
   useEffect(() => {
-    if (!authUser || !profile || profile.biKhoa || profile.yeuCauDoiMatKhau) return;
+    if (!isRealAuthUser || !profile || profile.biKhoa || profile.yeuCauDoiMatKhau) return;
     if (profile.vaiTro === 'quanTri' && !autoSeededRef.current) {
       autoSeededRef.current = true;
       void seedDefaultCatalogs();
     }
-  }, [authUser, profile]);
+  }, [isRealAuthUser, profile]);
 
   useEffect(() => {
-    if (!authUser || !profile || profile.biKhoa || profile.yeuCauDoiMatKhau) return;
+    if (!canLoadCatalogs) {
+      setSubjects([]);
+      setDepartments([]);
+      return;
+    }
     const unsubSub = subscribeSubjects(setSubjects);
     const unsubDept = subscribeDepartments(setDepartments);
     return () => {
       unsubSub();
       unsubDept();
     };
-  }, [authUser, profile]);
+  }, [canLoadCatalogs]);
 
   useEffect(() => {
-    if (
-      !authUser ||
-      !profile ||
-      profile.biKhoa ||
-      profile.yeuCauDoiMatKhau ||
-      profile.vaiTro !== 'quanTri'
-    ) {
+    const canLoadUsers = Boolean(
+      (isRealAuthUser &&
+        profile &&
+        !profile.biKhoa &&
+        !profile.yeuCauDoiMatKhau &&
+        profile.vaiTro === 'quanTri') ||
+        activeSsoBaseProfile
+    );
+    if (!canLoadUsers) {
       setAllUsers([]);
       return;
     }
     return subscribeAllUsers(setAllUsers);
-  }, [authUser, profile]);
+  }, [isRealAuthUser, profile, activeSsoBaseProfile]);
+
+  const resolvedSsoProfile: UserProfile | null = useMemo(() => {
+    if (!activeSsoBaseProfile) return null;
+    if (allUsers.length === 0) return activeSsoBaseProfile;
+
+    const targetEmail = (activeSsoBaseProfile.email || '').trim().toLowerCase();
+    const targetName = normalizeVietnamese(activeSsoBaseProfile.hoTen || '');
+
+    const matchedByEmail = targetEmail
+      ? allUsers.find((u) => (u.email || '').trim().toLowerCase() === targetEmail)
+      : undefined;
+
+    const nameMatches =
+      !matchedByEmail && targetName
+        ? allUsers.filter((u) => normalizeVietnamese(u.hoTen || '') === targetName)
+        : [];
+
+    const matchedUser =
+      matchedByEmail || (nameMatches.length === 1 ? nameMatches[0] : undefined);
+
+    if (!matchedUser) return activeSsoBaseProfile;
+
+    return {
+      ...activeSsoBaseProfile,
+      uid: matchedUser.uid || activeSsoBaseProfile.uid,
+      hoTen: matchedUser.hoTen || activeSsoBaseProfile.hoTen,
+      email: matchedUser.email || activeSsoBaseProfile.email,
+      vaiTro: matchedUser.vaiTro || activeSsoBaseProfile.vaiTro,
+      role: matchedUser.role || activeSsoBaseProfile.role,
+      chucVu: matchedUser.chucVu || activeSsoBaseProfile.chucVu,
+      toKhoi:
+        matchedUser.toKhoi || matchedUser.toChuyenMon || activeSsoBaseProfile.toKhoi,
+      toChuyenMon:
+        matchedUser.toChuyenMon || matchedUser.toKhoi || activeSsoBaseProfile.toKhoi,
+      biKhoa: Boolean(matchedUser.biKhoa),
+      yeuCauDoiMatKhau: false,
+    };
+  }, [activeSsoBaseProfile, allUsers]);
+
+  const effectiveProfile = isRealAuthUser ? profile : resolvedSsoProfile;
+  const currentUser = isRealAuthUser
+    ? authUser
+    : ssoSession
+      ? {
+          ...ssoSession.currentUser,
+          uid: effectiveProfile?.uid || ssoSession.currentUser.uid,
+          email: effectiveProfile?.email || ssoSession.currentUser.email,
+          displayName: effectiveProfile?.hoTen || ssoSession.currentUser.displayName,
+        }
+      : null;
+  const isAuthenticated = Boolean(currentUser && effectiveProfile);
+
+  const effectiveUid = effectiveProfile?.uid || '';
+  const effectiveRole = effectiveProfile?.vaiTro || 'giaoVien';
+  const effectiveDept = effectiveProfile?.toKhoi || '';
+  const effectiveName = effectiveProfile?.hoTen || '';
+  const effectiveEmail = effectiveProfile?.email || '';
+  const effectiveBlocked = Boolean(
+    effectiveProfile?.biKhoa || effectiveProfile?.yeuCauDoiMatKhau
+  );
 
   useEffect(() => {
-    if (!authUser || !profile || profile.biKhoa || profile.yeuCauDoiMatKhau) {
+    if (!isAuthenticated || !effectiveProfile || effectiveBlocked) {
       setMaterials([]);
       setMaterialsLoading(false);
       return;
     }
     setMaterialsLoading(true);
     return subscribeMaterialsForUser(
-      profile,
+      effectiveProfile,
       (list) => {
         setMaterials(list);
         setMaterialsLoading(false);
       },
       () => setMaterialsLoading(false)
     );
-  }, [authUser, profile]);
-
-  const currentUser = authUser ?? ssoSession?.currentUser ?? null;
-  const effectiveProfile = profile ?? (!authUser ? ssoSession?.profile ?? null : null);
-  const isAuthenticated = Boolean(currentUser && effectiveProfile);
+  }, [
+    isAuthenticated,
+    effectiveUid,
+    effectiveRole,
+    effectiveDept,
+    effectiveName,
+    effectiveBlocked,
+  ]);
 
   const effectiveSubjects: SubjectItem[] = useMemo(() => {
     if (subjects.length > 0) return subjects;
@@ -203,10 +288,41 @@ export function useKhoHocLieu() {
     }));
   }, [departments]);
 
+  const matchingOwnerUids = useMemo(() => {
+    const set = new Set<string>();
+    if (effectiveUid) set.add(effectiveUid);
+    if (ssoSession?.profile.uid) set.add(ssoSession.profile.uid);
+    const targetEmail = effectiveEmail.trim().toLowerCase();
+    if (targetEmail) {
+      allUsers.forEach((u) => {
+        if ((u.email || '').trim().toLowerCase() === targetEmail && u.uid) {
+          set.add(u.uid);
+        }
+      });
+    }
+    return set;
+  }, [effectiveUid, ssoSession?.profile.uid, effectiveEmail, allUsers]);
+
   const myMaterials = useMemo(() => {
     if (!effectiveProfile) return [];
-    return materials.filter((m) => m.nguoiDangUid === effectiveProfile.uid);
-  }, [materials, effectiveProfile]);
+    const normalizedOwnerName = normalizeVietnamese(effectiveName);
+    const targetEmail = effectiveEmail.trim().toLowerCase();
+
+    return materials.filter((m) => {
+      if (m.nguoiDangUid && matchingOwnerUids.has(m.nguoiDangUid)) return true;
+      const docEmail = (m as { nguoiDangEmail?: string }).nguoiDangEmail
+        ?.trim()
+        .toLowerCase();
+      if (targetEmail && docEmail && docEmail === targetEmail) return true;
+      if (
+        normalizedOwnerName &&
+        normalizeVietnamese(m.nguoiDangTen || '') === normalizedOwnerName
+      ) {
+        return true;
+      }
+      return false;
+    });
+  }, [materials, effectiveProfile, matchingOwnerUids, effectiveName, effectiveEmail]);
 
   const pendingApprovalCount = useMemo(() => {
     if (!effectiveProfile) return 0;
@@ -283,17 +399,20 @@ export function useKhoHocLieu() {
   }
 
   async function signOutUser() {
+    silentAuthAttemptedRef.current = false;
     clearSsoSessionFromStorage();
     setSsoSession(null);
-    await signOut(auth);
+    if (auth.currentUser) {
+      await signOut(auth);
+    }
   }
 
   return {
     authReady,
-    authUser,
+    authUser: isRealAuthUser ? authUser : null,
     currentUser,
     isAuthenticated,
-    isSsoSession: Boolean(!authUser && ssoSession),
+    isSsoSession: Boolean(!isRealAuthUser && ssoSession),
     profileLoading,
     profile: effectiveProfile,
     refreshProfile: () => setProfileRefreshTick((t) => t + 1),

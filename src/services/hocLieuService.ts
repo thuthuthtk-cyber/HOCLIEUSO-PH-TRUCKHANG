@@ -17,7 +17,7 @@ import {
   deleteObject,
   ref,
 } from 'firebase/storage';
-import { db, handleFirestoreError, OperationType, storage } from '../config/firebase';
+import { auth, db, handleFirestoreError, OperationType, storage } from '../config/firebase';
 import {
   DEFAULT_DEPARTMENTS,
   DEFAULT_SUBJECTS,
@@ -54,7 +54,11 @@ export function subscribeMaterialsForUser(
       },
       (err) => {
         onError();
-        handleFirestoreError(err, OperationType.LIST, 'materials');
+        if (auth.currentUser) {
+          handleFirestoreError(err, OperationType.LIST, 'materials');
+        } else {
+          console.warn('Firestore subscribeMaterialsForUser warning (SSO mode):', err);
+        }
       }
     );
   }
@@ -77,6 +81,17 @@ export function subscribeMaterialsForUser(
       key: 'mine',
       q: query(collection(db, 'materials'), where('nguoiDangUid', '==', profile.uid)),
     },
+    ...(profile.hoTen?.trim()
+      ? [
+          {
+            key: 'mineByName',
+            q: query(
+              collection(db, 'materials'),
+              where('nguoiDangTen', '==', profile.hoTen.trim())
+            ),
+          },
+        ]
+      : []),
     profile.vaiTro === 'toTruong'
       ? {
           key: 'dept',
@@ -105,7 +120,11 @@ export function subscribeMaterialsForUser(
       },
       (err) => {
         onError();
-        handleFirestoreError(err, OperationType.LIST, 'materials');
+        if (auth.currentUser) {
+          handleFirestoreError(err, OperationType.LIST, 'materials');
+        } else {
+          console.warn('Firestore subscribeMaterialsForUser warning (SSO mode):', err);
+        }
       }
     )
   );

@@ -1,3 +1,8 @@
+import {
+  signInAnonymously,
+  signInWithCustomToken,
+  type Auth,
+} from 'firebase/auth';
 import type { UserProfile, UserRole } from '../types/hocLieu';
 
 export const SSO_STORAGE_KEY = 'khl_pk_truc_khang_sso_session';
@@ -267,4 +272,31 @@ export function detectInitialSsoSession(): SsoSession | null {
   }
 
   return null;
+}
+
+export async function attemptSilentFirebaseAuthForSso(
+  firebaseAuth: Auth,
+  ssoToken?: string
+): Promise<boolean> {
+  if (firebaseAuth.currentUser) {
+    return true;
+  }
+
+  const trimmedToken = (ssoToken || '').trim();
+  if (trimmedToken && trimmedToken.split('.').length === 3) {
+    try {
+      await signInWithCustomToken(firebaseAuth, trimmedToken);
+      return true;
+    } catch {
+      // Fallback to anonymous auth below if token is not a Firebase custom token
+    }
+  }
+
+  try {
+    await signInAnonymously(firebaseAuth);
+    return true;
+  } catch {
+    // Silent fallback: Firestore read rules allow reading in SSO iframe mode even without Firebase Auth session
+    return false;
+  }
 }

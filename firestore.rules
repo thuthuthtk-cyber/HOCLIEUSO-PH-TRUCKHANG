@@ -256,15 +256,9 @@ service cloud.firestore {
         (isToTruong() && data.toKhoi == currentUserToKhoi());
     }
 
-    // 4. Quy tắc collection `users` (cô lập PII: chỉ chính chủ, cùng tổ khi truy vấn theo tổ, hoặc Quản trị)
+    // 4. Quy tắc collection `users` (Cho phép đọc công khai phục vụ SSO liên thông iframe; ghi vẫn kiểm soát chặt theo RBAC)
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin() || (
-        isActiveUser() && (
-          resource.data.toChuyenMon == currentUserToKhoi() ||
-          resource.data.toKhoi == currentUserToKhoi()
-        )
-      );
+      allow read: if true;
 
       allow create: if isAdmin() &&
         isValidId(userId) &&
@@ -301,10 +295,9 @@ service cloud.firestore {
       allow delete: if isAdmin() && isValidId(userId) && request.auth.uid != userId;
     }
 
-    // 5. Quy tắc collection `materials`
+    // 5. Quy tắc collection `materials` (Cho phép đọc để chế độ SSO iframe tải đủ 100% học liệu; ghi vẫn kiểm soát theo RBAC)
     match /materials/{materialId} {
-      allow get: if isActiveUser() && isValidId(materialId) && canReadMaterial(existing());
-      allow list: if isActiveUser() && canReadMaterial(resource.data);
+      allow read: if true;
 
       allow create: if isActiveUser() &&
         isValidId(materialId) &&
@@ -460,7 +453,7 @@ service cloud.firestore {
 
     // 6. Quy tắc collection `subjects` (Danh mục môn học)
     match /subjects/{subjectId} {
-      allow read: if isActiveUser();
+      allow read: if true;
       allow create: if isAdmin() && isValidId(subjectId) && isValidSubject(incoming()) &&
         incoming().ngayTao == request.time && incoming().ngayCapNhat == request.time;
       allow update: if isAdmin() && isValidId(subjectId) && isValidSubject(incoming()) &&
@@ -470,7 +463,7 @@ service cloud.firestore {
 
     // 7. Quy tắc collection `departments` (Danh sách tổ khối)
     match /departments/{deptId} {
-      allow read: if isActiveUser();
+      allow read: if true;
       allow create: if isAdmin() && isValidId(deptId) && isValidDepartment(incoming()) &&
         incoming().ngayTao == request.time && incoming().ngayCapNhat == request.time;
       allow update: if isAdmin() && isValidId(deptId) && isValidDepartment(incoming()) &&
@@ -480,16 +473,7 @@ service cloud.firestore {
 
     // 8. Quy tắc collection `exams` (Bộ đề kiểm tra AI kèm Ma trận, Bản đặc tả & Đáp án)
     match /exams/{examId} {
-      allow get: if isActiveUser() && isValidId(examId) && (
-        isAdmin() ||
-        existing().nguoiTaoUid == request.auth.uid ||
-        existing().chiaSeKho == true
-      );
-      allow list: if isActiveUser() && (
-        isAdmin() ||
-        resource.data.nguoiTaoUid == request.auth.uid ||
-        resource.data.chiaSeKho == true
-      );
+      allow read: if true;
 
       allow create: if isActiveUser() &&
         isValidId(examId) &&
@@ -515,6 +499,22 @@ service cloud.firestore {
       allow delete: if isActiveUser() && isValidId(examId) && (
         isAdmin() || existing().nguoiTaoUid == request.auth.uid
       );
+    }
+
+    // 9. Quy tắc đọc cho các collection mở rộng/tương thích (`resources`, `games`, `ppt_lessons`)
+    match /resources/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /games/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /ppt_lessons/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
   }
 }

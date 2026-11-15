@@ -546,22 +546,39 @@ export function subscribeUserProfile(
   );
 }
 
-export function subscribeAllUsers(onData: (users: UserProfile[]) => void): Unsubscribe {
+export function subscribeAllUsers(
+  onData: (users: UserProfile[]) => void,
+  onError?: () => void
+): Unsubscribe {
   return onSnapshot(
     collection(db, 'users'),
     (snap) => {
-      const list = snap.docs.map((d) => ({
-        uid: d.id,
-        ...(d.data() as Omit<UserProfile, 'uid'>),
-      }));
-      list.sort((a, b) => a.hoTen.localeCompare(b.hoTen, 'vi'));
+      const list = snap.docs.map((d) => {
+        const data = d.data() as Omit<UserProfile, 'uid'> & { uid?: string };
+        return {
+          ...data,
+          uid: data.uid && data.uid.trim() ? data.uid : d.id,
+          toKhoi: data.toKhoi || data.toChuyenMon || '',
+        };
+      });
+      list.sort((a, b) => (a.hoTen || '').localeCompare(b.hoTen || '', 'vi'));
       onData(list);
     },
-    (err) => handleFirestoreError(err, OperationType.LIST, 'users')
+    (err) => {
+      onError?.();
+      if (auth.currentUser) {
+        handleFirestoreError(err, OperationType.LIST, 'users');
+      } else {
+        console.warn('Firestore subscribeAllUsers warning (SSO mode):', err);
+      }
+    }
   );
 }
 
-export function subscribeSubjects(onData: (subjects: SubjectItem[]) => void): Unsubscribe {
+export function subscribeSubjects(
+  onData: (subjects: SubjectItem[]) => void,
+  onError?: () => void
+): Unsubscribe {
   return onSnapshot(
     query(collection(db, 'subjects'), orderBy('thuTu', 'asc')),
     (snap) => {
@@ -571,12 +588,20 @@ export function subscribeSubjects(onData: (subjects: SubjectItem[]) => void): Un
       }));
       onData(list);
     },
-    (err) => handleFirestoreError(err, OperationType.LIST, 'subjects')
+    (err) => {
+      onError?.();
+      if (auth.currentUser) {
+        handleFirestoreError(err, OperationType.LIST, 'subjects');
+      } else {
+        console.warn('Firestore subscribeSubjects warning (SSO mode):', err);
+      }
+    }
   );
 }
 
 export function subscribeDepartments(
-  onData: (departments: DepartmentItem[]) => void
+  onData: (departments: DepartmentItem[]) => void,
+  onError?: () => void
 ): Unsubscribe {
   return onSnapshot(
     query(collection(db, 'departments'), orderBy('thuTu', 'asc')),
@@ -587,7 +612,14 @@ export function subscribeDepartments(
       }));
       onData(list);
     },
-    (err) => handleFirestoreError(err, OperationType.LIST, 'departments')
+    (err) => {
+      onError?.();
+      if (auth.currentUser) {
+        handleFirestoreError(err, OperationType.LIST, 'departments');
+      } else {
+        console.warn('Firestore subscribeDepartments warning (SSO mode):', err);
+      }
+    }
   );
 }
 
