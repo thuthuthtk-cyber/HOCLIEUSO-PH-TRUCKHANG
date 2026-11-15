@@ -848,7 +848,7 @@ export async function generateAiExamForRequest(
   let rawText = '';
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-4-hydrogen',
       contents: buildExamPrompt(examConfig),
       config: {
         systemInstruction: EXAM_SYSTEM_INSTRUCTION,

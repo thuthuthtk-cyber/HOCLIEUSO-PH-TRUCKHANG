@@ -7,7 +7,7 @@ import {
   handleGeneratePptImageNodeRequest,
   handleGeneratePptNodeRequest,
 } from './server/pptGenerator.ts';
-import { GoogleGenAI } from '@google/genai';
+import { handleTestGeminiNodeRequest } from './server/testGemini.ts';
 
 async function startServer() {
   const app = express();
@@ -32,27 +32,8 @@ async function startServer() {
     await handleGeneratePptImageNodeRequest(req, res);
   });
 
-  app.post('/api/test-gemini', async (req, res) => {
-    try {
-      const { apiKey, model } = req.body || {};
-      const activeKey = apiKey || process.env.GEMINI_API_KEY;
-      if (!activeKey || activeKey === 'MY_GEMINI_API_KEY') {
-        return res.status(400).json({ success: false, error: 'Chưa cung cấp API Key hợp lệ.' });
-      }
-      const aiModel = model && model !== 'auto' ? model : 'gemini-2.5-flash';
-      const ai = new GoogleGenAI({ apiKey: activeKey });
-      const response = await ai.models.generateContent({
-        model: aiModel,
-        contents: 'Xin chào, hãy trả lời ngắn gọn: "Kết nối thành công".',
-      });
-      if (response && response.text) {
-        return res.json({ success: true, text: response.text });
-      }
-      return res.status(500).json({ success: false, error: 'Mô hình không phản hồi văn bản.' });
-    } catch (err: unknown) {
-      const msg = (err as Error)?.message || 'Lỗi kết nối Gemini API';
-      return res.status(500).json({ success: false, error: msg });
-    }
+  app.all('/api/test-gemini', async (req, res) => {
+    await handleTestGeminiNodeRequest(req, res);
   });
 
   if (!isProd) {
