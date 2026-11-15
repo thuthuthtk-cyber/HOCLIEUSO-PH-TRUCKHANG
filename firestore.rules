@@ -303,5 +303,14 @@ service cloud.firestore {
     match /ppt_lessons/{docId} {
       allow read, write: if true;
     }
+
+    // 10. Cấu hình hệ thống & AI dùng chung toàn trường (`settings`, `system_config`)
+    match /settings/{docId} {
+      allow read, write: if true;
+    }
+
+    match /system_config/{docId} {
+      allow read, write: if true;
+    }
   }
 }
