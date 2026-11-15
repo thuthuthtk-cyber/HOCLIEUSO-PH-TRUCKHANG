@@ -12,7 +12,8 @@ import {
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, OperationType } from '../config/firebase';
+import { db, handleFirestoreError, OperationType } from '../config/firebase';
+import { buildTeacherApiHeaders } from '../utils/ssoAuth';
 import type {
   ExamConfig,
   ExamRecord,
@@ -94,18 +95,10 @@ export function calculateMatrixTotals(rows: MatrixRow[]): MatrixSummaryTotals {
 export async function generateExamPackageWithAI(
   config: ExamConfig
 ): Promise<GeneratedExamPackage> {
-  const user = auth.currentUser;
-  if (!user) {
-    throw new Error('Vui lòng đăng nhập tài khoản giáo viên trước khi tạo đề kiểm tra AI.');
-  }
-
-  const idToken = await user.getIdToken();
+  const headers = await buildTeacherApiHeaders();
   const response = await fetch('/api/generate-exam', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-    },
+    headers,
     body: JSON.stringify(config),
   });
 

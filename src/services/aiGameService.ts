@@ -1,5 +1,6 @@
 import { doc, getDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, OperationType } from '../config/firebase';
+import { db, handleFirestoreError, OperationType } from '../config/firebase';
+import { buildTeacherApiHeaders } from '../utils/ssoAuth';
 import type {
   GameDifficulty,
   GameQuestionCount,
@@ -72,20 +73,10 @@ export class AiGameGenerationError extends Error {
 export async function requestAiGameHtml(
   payload: GenerateAiGameRequest
 ): Promise<GenerateAiGameResponse> {
-  const user = auth.currentUser;
-  if (!user) {
-    throw new AiGameGenerationError(
-      'Vui lòng đăng nhập lại để sử dụng tính năng Tạo trò chơi bằng AI.'
-    );
-  }
-
-  const idToken = await user.getIdToken();
+  const headers = await buildTeacherApiHeaders();
   const response = await fetch('/api/generate-game', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-    },
+    headers,
     body: JSON.stringify(payload),
   });
 

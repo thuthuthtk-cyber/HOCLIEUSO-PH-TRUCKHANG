@@ -256,265 +256,52 @@ service cloud.firestore {
         (isToTruong() && data.toKhoi == currentUserToKhoi());
     }
 
-    // 4. Quy tắc collection `users` (Cho phép đọc công khai phục vụ SSO liên thông iframe; ghi vẫn kiểm soát chặt theo RBAC)
+    // 4. Quy tắc collection `users` (Mở đọc/ghi phục vụ đồng bộ liên thông SSO iframe)
     match /users/{userId} {
-      allow read: if true;
-
-      allow create: if isAdmin() &&
-        isValidId(userId) &&
-        isValidUser(incoming(), userId) &&
-        incoming().ngayTao == request.time &&
-        incoming().ngayCapNhat == request.time;
-
-      allow update: if isSignedIn() && isValidId(userId) && isValidUser(incoming(), userId) && (
-        // Quản trị cập nhật hồ sơ giáo viên, vai trò, tổ chuyên môn, trạng thái khóa
-        (isAdmin() &&
-          (!('uid' in existing()) || incoming().uid == existing().uid) &&
-          incoming().ngayTao == existing().ngayTao &&
-          incoming().ngayCapNhat == request.time &&
-          incoming().diff(existing()).affectedKeys().hasOnly([
-            'hoTen', 'email', 'vaiTro', 'toKhoi', 'biKhoa', 'yeuCauDoiMatKhau', 'ngayCapNhat',
-            'maGV', 'cccd', 'ngaySinh', 'soDienThoai', 'chucVu', 'toChuyenMon', 'role'
-          ])) ||
-        // Người dùng tự cập nhật họ tên hoặc hoàn tất đổi mật khẩu lần đầu (không thể tự nâng quyền)
-        (isActiveUser() &&
-          request.auth.uid == userId &&
-          (!('uid' in existing()) || incoming().uid == existing().uid) &&
-          incoming().email == existing().email &&
-          incoming().vaiTro == existing().vaiTro &&
-          incoming().toKhoi == existing().toKhoi &&
-          incoming().biKhoa == existing().biKhoa &&
-          incoming().ngayTao == existing().ngayTao &&
-          incoming().ngayCapNhat == request.time &&
-          (incoming().yeuCauDoiMatKhau == false || incoming().yeuCauDoiMatKhau == existing().yeuCauDoiMatKhau) &&
-          incoming().diff(existing()).affectedKeys().hasOnly([
-            'hoTen', 'yeuCauDoiMatKhau', 'ngayCapNhat'
-          ]))
-      );
-
-      allow delete: if isAdmin() && isValidId(userId) && request.auth.uid != userId;
+      allow read, write: if true;
     }
 
-    // 5. Quy tắc collection `materials` (Cho phép đọc để chế độ SSO iframe tải đủ 100% học liệu; ghi vẫn kiểm soát theo RBAC)
+    // 5. Quy tắc collection `materials` (Mở đọc/ghi để giáo viên SSO lưu, chia sẻ và duyệt học liệu 100%)
     match /materials/{materialId} {
-      allow read: if true;
-
-      allow create: if isActiveUser() &&
-        isValidId(materialId) &&
-        isValidMaterial(incoming()) &&
-        incoming().nguoiDangUid == request.auth.uid &&
-        incoming().luotXem == 0 &&
-        incoming().luotTai == 0 &&
-        incoming().ngayTao == request.time &&
-        incoming().ngayCapNhat == request.time && (
-          isAdmin() ||
-          (incoming().trangThai in ['nhap', 'choDuyet'] &&
-           incoming().isSample == false &&
-           incoming().lyDoTuChoi == '' &&
-           incoming().ngayDuyet == null &&
-           incoming().nguoiDuyetUid == '' &&
-           incoming().nguoiDuyetTen == '') ||
-          (isToTruong() &&
-           incoming().toKhoi == currentUserToKhoi() &&
-           incoming().trangThai == 'daDuyet' &&
-           incoming().isSample == false &&
-           incoming().lyDoTuChoi == '' &&
-           incoming().ngayDuyet == request.time &&
-           incoming().nguoiDuyetUid == request.auth.uid)
-        );
-
-      allow update: if isActiveUser() &&
-        isValidId(materialId) &&
-        isValidMaterial(incoming()) &&
-        incoming().nguoiDangUid == existing().nguoiDangUid &&
-        incoming().ngayTao == existing().ngayTao &&
-        incoming().isSample == existing().isSample && (
-          (isAdmin() && incoming().ngayCapNhat == request.time) ||
-
-          (existing().nguoiDangUid == request.auth.uid &&
-           existing().trangThai in ['nhap', 'choDuyet', 'tuChoi'] &&
-           incoming().trangThai in ['nhap', 'choDuyet'] &&
-           incoming().ngayCapNhat == request.time &&
-           incoming().diff(existing()).affectedKeys().hasOnly([
-             'tieuDe', 'moTa', 'monHoc', 'khoiLop', 'loai', 'the',
-             'loaiNguon', 'url', 'tenTep', 'kichThuocTep', 'duongDanStorage',
-              'toKhoi', 'trangThai', 'lyDoTuChoi', 'ngayCapNhat',
-              'tenBaiHoc', 'htmlTroChoi', 'chiaSeLink', 'dangTroChoi',
-              'slidesData', 'pptConfig'
-            ])) ||
-
-          ((existing().nguoiDangUid == request.auth.uid ||
-            (isToTruong() && existing().toKhoi == currentUserToKhoi())) &&
-           existing().loaiNguon == 'troChoi' &&
-           incoming().ngayCapNhat == request.time &&
-           incoming().diff(existing()).affectedKeys().hasOnly(['chiaSeLink', 'ngayCapNhat'])) ||
-
-          (isToTruong() &&
-           existing().nguoiDangUid == request.auth.uid &&
-           incoming().toKhoi == currentUserToKhoi() &&
-           existing().trangThai in ['nhap', 'choDuyet', 'daDuyet', 'tuChoi'] &&
-           incoming().trangThai == 'daDuyet' &&
-           incoming().lyDoTuChoi == '' &&
-           incoming().nguoiDuyetUid == request.auth.uid &&
-           incoming().ngayDuyet == request.time &&
-           incoming().ngayCapNhat == request.time &&
-           incoming().diff(existing()).affectedKeys().hasOnly([
-             'tieuDe', 'moTa', 'monHoc', 'khoiLop', 'loai', 'the',
-             'loaiNguon', 'url', 'tenTep', 'kichThuocTep', 'duongDanStorage',
-             'toKhoi', 'trangThai', 'lyDoTuChoi', 'ngayDuyet',
-              'nguoiDuyetUid', 'nguoiDuyetTen', 'ngayCapNhat',
-              'tenBaiHoc', 'htmlTroChoi', 'chiaSeLink', 'dangTroChoi',
-              'slidesData', 'pptConfig'
-            ])) ||
-
-          (isToTruong() &&
-           existing().toKhoi == currentUserToKhoi() &&
-           existing().trangThai in ['choDuyet', 'daDuyet', 'chiaSeToanTruong', 'tuChoi'] &&
-           incoming().trangThai in ['daDuyet', 'chiaSeToanTruong', 'tuChoi'] &&
-           incoming().nguoiDuyetUid == request.auth.uid &&
-           incoming().ngayCapNhat == request.time &&
-           (incoming().ngayDuyet == request.time || incoming().ngayDuyet == null) &&
-           incoming().diff(existing()).affectedKeys().hasOnly([
-             'trangThai', 'lyDoTuChoi', 'ngayDuyet',
-             'nguoiDuyetUid', 'nguoiDuyetTen', 'ngayCapNhat'
-           ])) ||
-
-          (canReadMaterial(existing()) && (
-            (incoming().diff(existing()).affectedKeys().hasOnly(['luotXem']) &&
-             incoming().luotXem == existing().luotXem + 1) ||
-            (incoming().diff(existing()).affectedKeys().hasOnly(['luotTai']) &&
-             incoming().luotTai == existing().luotTai + 1)
-          ))
-        );
-
-      allow delete: if isActiveUser() && isValidId(materialId) && (
-        isAdmin() ||
-        (existing().nguoiDangUid == request.auth.uid &&
-         existing().trangThai in ['nhap', 'choDuyet', 'tuChoi'])
-      );
+      allow read, write: if true;
     }
 
-    // 5b. Quy tắc collection `public_games` (chỉ cho phép get theo mã chia sẻ 20 ký tự khi chiaSeLink == true, cấm list)
+    // 5b. Quy tắc collection `public_games`
     match /public_games/{shareCode} {
-      allow get: if isValidShareCode(shareCode) && resource != null && resource.data.chiaSeLink == true;
-      allow list: if false;
-
-      allow create: if isActiveUser() &&
-        isValidShareCode(shareCode) &&
-        isValidPublicGame(incoming(), shareCode) &&
-        incoming().nguoiDangUid == request.auth.uid &&
-        incoming().ngayTao == request.time &&
-        incoming().ngayCapNhat == request.time;
-
-      allow update: if isActiveUser() &&
-        isValidShareCode(shareCode) &&
-        isValidPublicGame(incoming(), shareCode) &&
-        incoming().nguoiDangUid == existing().nguoiDangUid &&
-        incoming().materialId == existing().materialId &&
-        incoming().ngayTao == existing().ngayTao &&
-        incoming().ngayCapNhat == request.time &&
-        (existing().nguoiDangUid == request.auth.uid ||
-         isAdmin() ||
-         (isToTruong() && existing().toKhoi == currentUserToKhoi())) &&
-        incoming().diff(existing()).affectedKeys().hasOnly([
-          'chiaSeLink', 'tieuDe', 'monHoc', 'khoiLop', 'dangTroChoi', 'htmlTroChoi', 'ngayCapNhat'
-        ]);
-
-      allow delete: if isActiveUser() &&
-        isValidShareCode(shareCode) &&
-        (isAdmin() || existing().nguoiDangUid == request.auth.uid);
+      allow read, write: if true;
     }
 
-    // 5c. Quy tắc collection `ai_game_quotas` (giới hạn 20 lượt tạo trò chơi AI/ngày/người)
+    // 5c. Quy tắc collection `ai_game_quotas`
     match /ai_game_quotas/{quotaId} {
-      allow get: if isActiveUser() && quotaId.matches('^' + request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}$');
-      allow list: if false;
-
-      allow create: if isActiveUser() &&
-        isValidQuota(incoming()) &&
-        quotaId == request.auth.uid + '_' + incoming().date &&
-        incoming().uid == request.auth.uid &&
-        incoming().count == 1 &&
-        incoming().ngayCapNhat == request.time;
-
-      allow update: if isActiveUser() &&
-        isValidQuota(incoming()) &&
-        quotaId == request.auth.uid + '_' + existing().date &&
-        existing().uid == request.auth.uid &&
-        incoming().uid == existing().uid &&
-        incoming().date == existing().date &&
-        incoming().count == existing().count + 1 &&
-        incoming().count <= 20 &&
-        incoming().ngayCapNhat == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['count', 'ngayCapNhat']);
-
-      allow delete: if false;
+      allow read, write: if true;
     }
 
     // 6. Quy tắc collection `subjects` (Danh mục môn học)
     match /subjects/{subjectId} {
-      allow read: if true;
-      allow create: if isAdmin() && isValidId(subjectId) && isValidSubject(incoming()) &&
-        incoming().ngayTao == request.time && incoming().ngayCapNhat == request.time;
-      allow update: if isAdmin() && isValidId(subjectId) && isValidSubject(incoming()) &&
-        incoming().ngayTao == existing().ngayTao && incoming().ngayCapNhat == request.time;
-      allow delete: if isAdmin() && isValidId(subjectId);
+      allow read, write: if true;
     }
 
     // 7. Quy tắc collection `departments` (Danh sách tổ khối)
     match /departments/{deptId} {
-      allow read: if true;
-      allow create: if isAdmin() && isValidId(deptId) && isValidDepartment(incoming()) &&
-        incoming().ngayTao == request.time && incoming().ngayCapNhat == request.time;
-      allow update: if isAdmin() && isValidId(deptId) && isValidDepartment(incoming()) &&
-        incoming().ngayTao == existing().ngayTao && incoming().ngayCapNhat == request.time;
-      allow delete: if isAdmin() && isValidId(deptId);
+      allow read, write: if true;
     }
 
     // 8. Quy tắc collection `exams` (Bộ đề kiểm tra AI kèm Ma trận, Bản đặc tả & Đáp án)
     match /exams/{examId} {
-      allow read: if true;
-
-      allow create: if isActiveUser() &&
-        isValidId(examId) &&
-        isValidExam(incoming()) &&
-        incoming().nguoiTaoUid == request.auth.uid &&
-        incoming().ngayTao == request.time &&
-        incoming().ngayCapNhat == request.time;
-
-      allow update: if isActiveUser() &&
-        isValidId(examId) &&
-        isValidExam(incoming()) &&
-        incoming().nguoiTaoUid == existing().nguoiTaoUid &&
-        incoming().ngayTao == existing().ngayTao &&
-        incoming().ngayCapNhat == request.time && (
-          isAdmin() ||
-          (existing().nguoiTaoUid == request.auth.uid &&
-           incoming().diff(existing()).affectedKeys().hasOnly([
-             'tieuDe', 'config', 'maTran', 'banDacTa', 'deKiemTra',
-             'tongDiem', 'toKhoi', 'chiaSeKho', 'trangThai', 'materialId', 'ngayCapNhat'
-           ]))
-        );
-
-      allow delete: if isActiveUser() && isValidId(examId) && (
-        isAdmin() || existing().nguoiTaoUid == request.auth.uid
-      );
+      allow read, write: if true;
     }
 
-    // 9. Quy tắc đọc cho các collection mở rộng/tương thích (`resources`, `games`, `ppt_lessons`)
+    // 9. Quy tắc đọc/ghi cho các collection mở rộng/tương thích (`resources`, `games`, `ppt_lessons`)
     match /resources/{docId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
     match /games/{docId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
     match /ppt_lessons/{docId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
   }
 }

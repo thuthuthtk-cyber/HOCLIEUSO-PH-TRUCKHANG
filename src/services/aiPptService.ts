@@ -5,7 +5,8 @@ import {
   serverTimestamp,
   setDoc,
 } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, OperationType } from '../config/firebase';
+import { db, handleFirestoreError, OperationType } from '../config/firebase';
+import { buildTeacherApiHeaders } from '../utils/ssoAuth';
 import type { LearningMaterial, MaterialStatus, UserProfile } from '../types/hocLieu';
 import {
   getPptStyleById,
@@ -23,25 +24,14 @@ export const PPT_IMAGE_MAX_CONCURRENCY = 3;
 export const PPT_IMAGE_TIMEOUT_MS = 45_000;
 export const PPT_IMAGE_MAX_RETRIES = 2;
 
-async function getTeacherIdToken(): Promise<string> {
-  const user = auth.currentUser;
-  if (!user) {
-    throw new Error('Vui lòng đăng nhập tài khoản giáo viên trước khi tạo bài giảng PPT AI.');
-  }
-  return user.getIdToken();
-}
-
 export async function generatePptOutline(
   config: PptGenerationConfig
 ): Promise<PptOutlineResponse> {
-  const idToken = await getTeacherIdToken();
+  const headers = await buildTeacherApiHeaders();
 
   const response = await fetch('/api/generate-ppt', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-    },
+    headers,
     body: JSON.stringify(config),
   });
 
@@ -72,7 +62,7 @@ export async function requestSingleSlideImage(
   params: SlideImageRequestParams,
   externalSignal?: AbortSignal
 ): Promise<{ imageDataUrl: string; modelUsed: string }> {
-  const idToken = await getTeacherIdToken();
+  const headers = await buildTeacherApiHeaders();
 
   const controller = new AbortController();
   let timedOut = false;
@@ -94,10 +84,7 @@ export async function requestSingleSlideImage(
   try {
     const response = await fetch('/api/generate-ppt-image', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
-      },
+      headers,
       body: JSON.stringify(params),
       signal: controller.signal,
     });

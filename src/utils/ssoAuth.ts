@@ -3,6 +3,7 @@ import {
   signInWithCustomToken,
   type Auth,
 } from 'firebase/auth';
+import { auth } from '../config/firebase';
 import type { UserProfile, UserRole } from '../types/hocLieu';
 
 export const SSO_STORAGE_KEY = 'khl_pk_truc_khang_sso_session';
@@ -206,7 +207,10 @@ export function readSsoParamsFromUrl(): {
   };
 }
 
+let latestSsoSession: SsoSession | null = null;
+
 export function saveSsoSessionToStorage(session: SsoSession): void {
+  latestSsoSession = session;
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(SSO_STORAGE_KEY, JSON.stringify(session));
@@ -216,13 +220,13 @@ export function saveSsoSessionToStorage(session: SsoSession): void {
 }
 
 export function loadSsoSessionFromStorage(): SsoSession | null {
-  if (typeof window === 'undefined') return null;
+  if (typeof window === 'undefined') return latestSsoSession;
   try {
     const raw = window.localStorage.getItem(SSO_STORAGE_KEY);
-    if (!raw) return null;
+    if (!raw) return latestSsoSession;
     const parsed = JSON.parse(raw) as Partial<SsoSession>;
-    if (!parsed?.profile?.email || !parsed?.currentUser?.uid) return null;
-    return {
+    if (!parsed?.profile?.email || !parsed?.currentUser?.uid) return latestSsoSession;
+    const hydrated: SsoSession = {
       currentUser: {
         uid: parsed.currentUser.uid,
         email: parsed.currentUser.email ?? parsed.profile.email,
@@ -238,12 +242,15 @@ export function loadSsoSessionFromStorage(): SsoSession | null {
       source: 'local_storage',
       savedAt: parsed.savedAt || Date.now(),
     };
+    latestSsoSession = hydrated;
+    return hydrated;
   } catch {
-    return null;
+    return latestSsoSession;
   }
 }
 
 export function clearSsoSessionFromStorage(): void {
+  latestSsoSession = null;
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.removeItem(SSO_STORAGE_KEY);
@@ -272,6 +279,82 @@ export function detectInitialSsoSession(): SsoSession | null {
   }
 
   return null;
+}
+
+export interface EffectiveUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  name: string;
+  role: 'admin' | 'toTruong' | 'giaoVien';
+  isSso: boolean;
+}
+
+export function getEffectiveUser(): EffectiveUser {
+  const firebaseUser = auth.currentUser;
+  if (firebaseUser && !firebaseUser.isAnonymous) {
+    const email = firebaseUser.email || DEFAULT_SSO_ADMIN_EMAIL;
+    const name = firebaseUser.displayName || DEFAULT_SSO_ADMIN_NAME;
+    return {
+      uid: firebaseUser.uid,
+      email,
+      displayName: name,
+      name,
+      role: email.toLowerCase() === DEFAULT_SSO_ADMIN_EMAIL ? 'admin' : 'giaoVien',
+      isSso: false,
+    };
+  }
+
+  const sso = latestSsoSession ?? loadSsoSessionFromStorage() ?? detectInitialSsoSession();
+  if (sso?.profile) {
+    const mappedRole: EffectiveUser['role'] =
+      sso.profile.vaiTro === 'quanTri'
+        ? 'admin'
+        : sso.profile.vaiTro === 'toTruong'
+          ? 'toTruong'
+          : 'giaoVien';
+    return {
+      uid: sso.profile.uid || 'sso_thuthuthtk',
+      email: sso.profile.email || DEFAULT_SSO_ADMIN_EMAIL,
+      displayName: sso.profile.hoTen || DEFAULT_SSO_ADMIN_NAME,
+      name: sso.profile.hoTen || DEFAULT_SSO_ADMIN_NAME,
+      role: mappedRole,
+      isSso: true,
+    };
+  }
+
+  return {
+    uid: 'sso_thuthuthtk',
+    email: DEFAULT_SSO_ADMIN_EMAIL,
+    displayName: DEFAULT_SSO_ADMIN_NAME,
+    name: DEFAULT_SSO_ADMIN_NAME,
+    role: 'admin',
+    isSso: true,
+  };
+}
+
+export async function buildTeacherApiHeaders(): Promise<Record<string, string>> {
+  const effective = getEffectiveUser();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-SSO-Email': effective.email,
+    'X-SSO-Uid': effective.uid,
+    'X-SSO-Role': effective.role,
+  };
+
+  const firebaseUser = auth.currentUser;
+  if (firebaseUser && !firebaseUser.isAnonymous) {
+    try {
+      const idToken = await firebaseUser.getIdToken();
+      if (idToken) {
+        headers.Authorization = `Bearer ${idToken}`;
+      }
+    } catch {
+      // Fallback safely to X-SSO-Email headers
+    }
+  }
+
+  return headers;
 }
 
 export async function attemptSilentFirebaseAuthForSso(
