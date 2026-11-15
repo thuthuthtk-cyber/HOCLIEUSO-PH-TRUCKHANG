@@ -1,3 +1,4 @@
+import { GoogleGenAI } from '@google/genai';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   FALLBACK_SERVER_TEXT_MODELS,
@@ -6,14 +7,12 @@ import {
   getServerGeminiClient,
 } from './geminiServerClient.ts';
 
-function isModelNotFoundError(err: unknown): boolean {
+function isInvalidApiKeyError(err: unknown): boolean {
   const msg = extractServerGeminiErrorMessage(err).toLowerCase();
   return (
-    msg.includes('404') ||
-    msg.includes('not found') ||
-    msg.includes('is not supported') ||
-    msg.includes('not_found') ||
-    msg.includes('does not exist')
+    msg.includes('api key not valid') ||
+    msg.includes('api_key_invalid') ||
+    msg.includes('invalid api key')
   );
 }
 
@@ -21,6 +20,35 @@ function sendJson(res: ServerResponse, status: number, data: unknown): void {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(data));
+}
+
+function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve) => {
+    const existingBody = (req as IncomingMessage & { body?: unknown }).body;
+    if (existingBody && typeof existingBody === 'object') {
+      resolve(existingBody as Record<string, unknown>);
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    req.on('data', (chunk: Buffer) => {
+      totalBytes += chunk.length;
+      if (totalBytes <= 32 * 1024) {
+        chunks.push(chunk);
+      }
+    });
+    req.on('end', () => {
+      try {
+        const text = Buffer.concat(chunks).toString('utf8').trim();
+        const parsed = text ? JSON.parse(text) : {};
+        resolve(parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {});
+      } catch {
+        resolve({});
+      }
+    });
+    req.on('error', () => resolve({}));
+  });
 }
 
 export async function handleTestGeminiNodeRequest(
@@ -39,10 +67,39 @@ export async function handleTestGeminiNodeRequest(
   }
 
   try {
-    const ai = getServerGeminiClient();
-    const candidates = [PRIMARY_SERVER_TEXT_MODEL, ...FALLBACK_SERVER_TEXT_MODELS].filter(
-      (model, index, arr) => arr.indexOf(model) === index
-    );
+    const body = await readJsonBody(req);
+    const customApiKey =
+      typeof body.apiKey === 'string'
+        ? body.apiKey.trim().replace(/[\u200B-\u200D\uFEFF\r\n]/g, '')
+        : '';
+    const requestedModel =
+      typeof body.model === 'string' && body.model.trim() && body.model.trim() !== 'auto'
+        ? body.model.trim()
+        : '';
+
+    const ai = customApiKey
+      ? new GoogleGenAI({ apiKey: customApiKey })
+      : getServerGeminiClient();
+
+    const candidates = (
+      customApiKey
+        ? [
+            requestedModel,
+            'gemini-3.0-flash',
+            'gemini-3-flash-preview',
+            'gemini-2.5-flash',
+            'gemini-2.0-flash',
+          ]
+        : [
+            PRIMARY_SERVER_TEXT_MODEL,
+            ...FALLBACK_SERVER_TEXT_MODELS,
+            requestedModel,
+            'gemini-3.0-flash',
+            'gemini-2.5-flash',
+          ]
+    )
+      .filter((m): m is string => Boolean(m))
+      .filter((model, index, arr) => arr.indexOf(model) === index);
 
     let lastErrorMsg = 'Lỗi kết nối Gemini API';
 
@@ -65,7 +122,7 @@ export async function handleTestGeminiNodeRequest(
         lastErrorMsg = 'Mô hình không phản hồi văn bản.';
       } catch (err) {
         lastErrorMsg = extractServerGeminiErrorMessage(err);
-        if (isModelNotFoundError(err) && i < candidates.length - 1) {
+        if (!isInvalidApiKeyError(err) && i < candidates.length - 1) {
           continue;
         }
         break;
