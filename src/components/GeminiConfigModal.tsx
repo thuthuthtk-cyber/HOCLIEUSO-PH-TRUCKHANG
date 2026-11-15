@@ -9,9 +9,17 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
 import type { UserProfile } from '../types/hocLieu';
+import {
+  DEFAULT_GEMINI_MODEL,
+  PERSONAL_GEMINI_KEY_STORAGE,
+  SELECTED_GEMINI_MODEL_STORAGE,
+  cleanApiKey,
+  fetchSchoolGeminiConfig,
+  saveGlobalGeminiConfig,
+  savePersonalGeminiConfig,
+  testGeminiApiKeyDirect,
+} from '../utils/geminiClient';
 import { useToast } from './ToastContext';
 
 interface GeminiConfigModalProps {
@@ -20,41 +28,19 @@ interface GeminiConfigModalProps {
   profile: UserProfile;
 }
 
-const PERSONAL_GEMINI_KEY_STORAGE = 'hs_gemini_personal_api_key';
-const GLOBAL_GEMINI_KEY_STORAGE = 'hs_gemini_global_api_key';
-const SELECTED_GEMINI_MODEL_STORAGE = 'hs_gemini_selected_model';
-
 const MODEL_OPTIONS = [
-  { value: 'auto', label: 'Tự động ưu tiên (Mặc định máy chủ: gemini-4-hydrogen)' },
-  { value: 'gemini-4-hydrogen', label: 'gemini-4-hydrogen (Khuyên dùng - Nhanh, ổn định)' },
-  { value: 'gemini-3.1-flash-lite', label: 'gemini-3.1-flash-lite (Nhanh, tiết kiệm)' },
-  { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash (Tương thích tiêu chuẩn)' },
+  { value: 'auto', label: 'Tự động ưu tiên (Mặc định: gemini-3.0-flash)' },
+  { value: 'gemini-3.0-flash', label: 'gemini-3.0-flash (Khuyên dùng - Nhanh, ổn định)' },
+  { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview (Xem trước thế hệ 3)' },
+  { value: 'gemini-2.0-flash', label: 'gemini-2.0-flash (Ổn định, tương thích rộng)' },
+  { value: 'gemini-1.5-flash', label: 'gemini-1.5-flash (Dự phòng tương thích)' },
 ];
-
-function cleanApiKey(raw: string | null | undefined): string {
-  if (!raw) return '';
-  return String(raw)
-    .trim()
-    .replace(/[\u200B-\u200D\uFEFF\r\n]/g, '');
-}
 
 function safeStorageGet(key: string): string {
   try {
     return localStorage.getItem(key) || '';
   } catch {
     return '';
-  }
-}
-
-function safeStorageSet(key: string, value: string): void {
-  try {
-    if (value) {
-      localStorage.setItem(key, value);
-    } else {
-      localStorage.removeItem(key);
-    }
-  } catch {
-    // Ignore storage partitioning / quota errors
   }
 }
 
@@ -80,9 +66,7 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
     setShowGlobalKey(false);
 
     setPersonalKey(cleanApiKey(safeStorageGet(PERSONAL_GEMINI_KEY_STORAGE)));
-    const cachedGlobal = cleanApiKey(safeStorageGet(GLOBAL_GEMINI_KEY_STORAGE));
     const cachedModel = safeStorageGet(SELECTED_GEMINI_MODEL_STORAGE).trim() || 'auto';
-    setGlobalKey(cachedGlobal);
     const validValues = new Set(MODEL_OPTIONS.map((m) => m.value));
     setSelectedModel(validValues.has(cachedModel) ? cachedModel : 'auto');
 
@@ -90,36 +74,13 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
     async function loadSchoolConfig() {
       setLoading(true);
       try {
-        const [settingsRes, legacyRes] = await Promise.allSettled([
-          getDoc(doc(db, 'settings', 'ai_config')),
-          getDoc(doc(db, 'system_config', 'gemini')),
-        ]);
+        const schoolCfg = await fetchSchoolGeminiConfig(true);
         if (cancelled) return;
-
-        const settingsData =
-          settingsRes.status === 'fulfilled' && settingsRes.value.exists()
-            ? (settingsRes.value.data() as Record<string, unknown>)
-            : null;
-        const legacyData =
-          legacyRes.status === 'fulfilled' && legacyRes.value.exists()
-            ? (legacyRes.value.data() as Record<string, unknown>)
-            : null;
-
-        const remoteKey = cleanApiKey(
-          (settingsData?.globalApiKey as string | undefined) ||
-            (legacyData?.globalApiKey as string | undefined)
-        );
-        const remoteModel = String(
-          settingsData?.selectedModel || legacyData?.selectedModel || ''
-        ).trim();
-
-        if (remoteKey) {
-          setGlobalKey(remoteKey);
-          safeStorageSet(GLOBAL_GEMINI_KEY_STORAGE, remoteKey);
+        if (schoolCfg.globalApiKey) {
+          setGlobalKey(schoolCfg.globalApiKey);
         }
-        if (remoteModel && validValues.has(remoteModel)) {
-          setSelectedModel(remoteModel);
-          safeStorageSet(SELECTED_GEMINI_MODEL_STORAGE, remoteModel);
+        if (schoolCfg.selectedModel && validValues.has(schoolCfg.selectedModel)) {
+          setSelectedModel(schoolCfg.selectedModel);
         }
       } catch {
         // Keep cached values if offline
@@ -135,41 +96,29 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
 
   if (!open) return null;
 
-  async function persistGlobalToFirestore(cleanGlobal: string, model: string) {
-    const payload = {
-      globalApiKey: cleanGlobal,
-      selectedModel: model,
-      updatedBy: profile.uid || 'sso_admin',
-      updatedByName: profile.hoTen || 'Quản trị viên',
-      ngayCapNhat: serverTimestamp(),
-    };
-    await Promise.all([
-      setDoc(doc(db, 'settings', 'ai_config'), payload, { merge: true }),
-      setDoc(doc(db, 'system_config', 'gemini'), payload, { merge: true }),
-    ]);
-  }
-
   async function handleSavePersonal(e: React.FormEvent) {
     e.preventDefault();
     setSavingPersonal(true);
     try {
-      const cleanPersonal = cleanApiKey(personalKey);
+      const cleanPersonal = savePersonalGeminiConfig(personalKey, selectedModel);
       setPersonalKey(cleanPersonal);
-      safeStorageSet(PERSONAL_GEMINI_KEY_STORAGE, cleanPersonal);
-      safeStorageSet(SELECTED_GEMINI_MODEL_STORAGE, selectedModel);
 
       if (isAdmin) {
         const cleanGlobal = cleanApiKey(globalKey);
         setGlobalKey(cleanGlobal);
-        safeStorageSet(GLOBAL_GEMINI_KEY_STORAGE, cleanGlobal);
         try {
-          await persistGlobalToFirestore(cleanGlobal, selectedModel);
+          await saveGlobalGeminiConfig({
+            globalApiKey: cleanGlobal,
+            selectedModel,
+            updatedBy: profile.uid || 'sso_admin',
+            updatedByName: profile.hoTen || 'Quản trị viên',
+          });
         } catch {
           // Local save still succeeds if Firestore is offline
         }
       }
 
-      showToast('Đã lưu cấu hình Gemini thành công.', 'success');
+      showToast('Đã lưu cấu hình Gemini API thành công.', 'success');
       onClose();
     } finally {
       setSavingPersonal(false);
@@ -183,11 +132,14 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
     }
     setSavingGlobal(true);
     try {
-      const cleanGlobal = cleanApiKey(globalKey);
-      setGlobalKey(cleanGlobal);
-      safeStorageSet(GLOBAL_GEMINI_KEY_STORAGE, cleanGlobal);
-      safeStorageSet(SELECTED_GEMINI_MODEL_STORAGE, selectedModel);
-      await persistGlobalToFirestore(cleanGlobal, selectedModel);
+      const result = await saveGlobalGeminiConfig({
+        globalApiKey: globalKey,
+        selectedModel,
+        updatedBy: profile.uid || 'sso_admin',
+        updatedByName: profile.hoTen || 'Quản trị viên',
+      });
+      setGlobalKey(result.globalApiKey);
+      setSelectedModel(result.selectedModel);
       showToast(
         'Đã lưu Global Gemini API Key & Mô hình lên Firestore thành công.',
         'success'
@@ -212,35 +164,24 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
       }
 
       const activeKey = cleanPersonal || cleanGlobal;
-      const res = await fetch('/api/test-gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: activeKey, model: selectedModel }),
-      });
+      const result = await testGeminiApiKeyDirect(activeKey, selectedModel);
 
-      const data = (await res.json().catch(() => ({}))) as {
-        success?: boolean;
-        workingModel?: string;
-        message?: string;
-        error?: string;
-      };
-
-      if (res.ok && data.success) {
-        if (data.workingModel && MODEL_OPTIONS.some((m) => m.value === data.workingModel)) {
-          setSelectedModel(data.workingModel);
+      if (result.success) {
+        if (
+          result.workingModel &&
+          MODEL_OPTIONS.some((m) => m.value === result.workingModel)
+        ) {
+          setSelectedModel(result.workingModel);
         }
-        const okMessage =
-          data.message || 'Kết nối Google Gemini API qua máy chủ thành công! Mô hình phản hồi tốt.';
-        setTestStatus({ success: true, message: okMessage });
-        showToast(okMessage, 'success');
+        setTestStatus({ success: true, message: result.message });
+        showToast(result.message, 'success');
       } else {
-        const errMessage = data.error || 'Kết nối thất bại. Vui lòng kiểm tra lại cấu hình.';
-        setTestStatus({ success: false, message: errMessage });
-        showToast(errMessage, 'error');
+        setTestStatus({ success: false, message: result.message });
+        showToast(result.message, 'error');
       }
     } catch (err) {
       const msg =
-        err instanceof Error ? err.message : 'Không thể kết nối đến máy chủ kiểm tra.';
+        err instanceof Error ? err.message : 'Kết nối thất bại. Vui lòng kiểm tra lại API Key.';
       setTestStatus({ success: false, message: msg });
       showToast(msg, 'error');
     } finally {
@@ -260,7 +201,7 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
             <div>
               <h2 className="text-base font-bold">Cấu Hình Google Gemini API Key</h2>
               <p className="text-xs text-slate-300">
-                Xử lý AI qua máy chủ ứng dụng · Cá nhân & Toàn trường
+                Kết nối trực tiếp @google/genai · Cá nhân & Toàn trường
               </p>
             </div>
           </div>
@@ -277,8 +218,10 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
         {/* Content body */}
         <form onSubmit={handleSavePersonal} className="p-6 space-y-5 overflow-y-auto max-h-[82vh]">
           <p className="text-xs sm:text-sm text-slate-600 bg-teal-50 border border-teal-200 rounded-xl p-3 leading-relaxed">
-            Hệ thống tự động xử lý mọi tính năng AI qua máy chủ bằng{' '}
-            <strong>Gemini API Key đã cấu hình sẵn</strong> để mọi giáo viên mở ứng dụng đều dùng được ngay.
+            Ứng dụng kết nối trực tiếp tới Google Gemini API (ưu tiên{' '}
+            <strong>Personal Key</strong>, nếu để trống sẽ tự dùng{' '}
+            <strong>Global Key toàn trường</strong> trên Firestore). Hỗ trợ tự động chuyển đổi mô
+            hình dự phòng từ <code>{DEFAULT_GEMINI_MODEL}</code>.
           </p>
 
           {/* Ô 1: Personal API Key */}
@@ -293,7 +236,7 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
                 value={personalKey}
                 onChange={(e) => setPersonalKey(e.target.value)}
                 onBlur={() => setPersonalKey((prev) => cleanApiKey(prev))}
-                placeholder="AIzaSy... (để trống nếu dùng khóa mặc định của máy chủ)"
+                placeholder="AIzaSy... (để trống nếu dùng khóa toàn trường)"
                 autoComplete="off"
                 spellCheck={false}
                 className="w-full min-h-[46px] pl-3.5 pr-11 py-2 rounded-xl border border-slate-300 text-sm sm:text-base font-mono focus:outline-none focus:border-teal-700 bg-slate-50/50"
@@ -309,7 +252,7 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
               </button>
             </div>
             <p className="text-xs text-slate-500">
-              Lưu cục bộ trong localStorage (tự động xóa khoảng trắng thừa). Nếu để trống, máy chủ tự dùng khóa mặc định của hệ thống.
+              Lưu cục bộ trong localStorage (tự động xóa khoảng trắng thừa).
             </p>
           </div>
 
@@ -351,7 +294,7 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
               </button>
             </div>
             <p className="text-xs text-slate-500">
-              Quản trị viên có thể lưu cấu hình dùng chung lên Firestore để đồng bộ cho toàn trường.
+              Quản trị viên lưu cấu hình dùng chung lên Firestore để đồng bộ cho mọi giáo viên.
             </p>
           </div>
 
@@ -363,7 +306,7 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
                 Mô hình AI mặc định:
               </label>
               <span className="text-xs text-slate-500 font-medium">
-                {selectedModel === 'auto' ? 'Ưu tiên: gemini-4-hydrogen' : selectedModel}
+                {selectedModel === 'auto' ? `Ưu tiên: ${DEFAULT_GEMINI_MODEL}` : selectedModel}
               </span>
             </div>
             <select
@@ -378,8 +321,9 @@ export function GeminiConfigModal({ open, onClose, profile }: GeminiConfigModalP
               ))}
             </select>
             <p className="text-xs text-slate-500">
-              Máy chủ tự động chọn mô hình khả dụng (mặc định{' '}
-              <code>gemini-4-hydrogen</code>) để đảm bảo phản hồi ổn định cho mọi giáo viên.
+              Nếu mô hình đang chọn không khả dụng với API Key, hệ thống tự động chuyển sang chuỗi
+              dự phòng (<code>gemini-3.0-flash</code> → <code>gemini-3-flash-preview</code> →{' '}
+              <code>gemini-2.0-flash</code> → <code>gemini-1.5-flash</code>).
             </p>
           </div>
 

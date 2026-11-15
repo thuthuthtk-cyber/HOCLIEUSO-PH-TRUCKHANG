@@ -246,6 +246,8 @@ export function PptGeneratorWorkspace({ profile, subjects }: PptGeneratorWorkspa
           styleId: targetStyleId,
           sharedStylePrompt: effectiveStylePrompt,
           mascotIds: selectedMascotIds,
+          visualMotif: slide.visualMotif,
+          slideNumber: slide.slideNumber,
         },
         {
           maxRetries: PPT_IMAGE_MAX_RETRIES,

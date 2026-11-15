@@ -1,3 +1,4 @@
+import { Type } from '@google/genai';
 import {
   collection,
   doc,
@@ -6,9 +7,10 @@ import {
   setDoc,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../config/firebase';
-import { buildTeacherApiHeaders } from '../utils/ssoAuth';
 import type { LearningMaterial, MaterialStatus, UserProfile } from '../types/hocLieu';
 import {
+  PPT_MASCOT_LIBRARY,
+  PPT_STYLE_LIBRARY,
   getPptStyleById,
   type PptGradeLevel,
   type PptGenerationConfig,
@@ -18,34 +20,195 @@ import {
   type SavedPptConfig,
   type SavedPptSlideData,
   type SlideImageStatus,
+  type SlideVisualMotif,
 } from '../types/ppt';
+import {
+  generateImageWithClientGemini,
+  generateTextWithClientGemini,
+} from '../utils/geminiClient';
+import { generateSyncedMascotSlideArt } from '../utils/slideMascotArt';
 
 export const PPT_IMAGE_MAX_CONCURRENCY = 3;
 export const PPT_IMAGE_TIMEOUT_MS = 45_000;
 export const PPT_IMAGE_MAX_RETRIES = 2;
 
+const ALLOWED_GRADES: PptGradeLevel[] = ['1', '2', '3', '4', '5'];
+const ALLOWED_MOTIFS: SlideVisualMotif[] = [
+  'book',
+  'sparkles',
+  'lightbulb',
+  'compass',
+  'puzzle',
+  'award',
+  'users',
+  'leaf',
+];
+
+const PPT_OUTLINE_SYSTEM_INSTRUCTION = `Bạn là Chuyên gia Thiết kế Bài giảng Tiểu học Việt Nam (Chương trình GDPT 2018).
+Nhiệm vụ của bạn là thiết kế dàn ý bài giảng PowerPoint sinh động, súc tích, dễ dạy trên lớp cho giáo viên tiểu học (lớp 1 đến lớp 5).
+
+QUY TẮC NỘI DUNG SLIDE:
+1. Slide 1 là Slide mở đầu / Khởi động giới thiệu tên bài học hấp dẫn.
+2. Các slide tiếp theo triển khai logic sư phạm: Khám phá kiến thức -> Thực hành / Luyện tập -> Vận dụng -> Tổng kết / Dặn dò.
+3. Mỗi slide có:
+   - title: Tiêu đề ngắn gọn, nổi bật (6-12 từ).
+   - bullets: 3 đến 4 ý chính súc tích, dễ đọc trên máy chiếu (mỗi ý 8-18 từ, chữ tiếng Việt chuẩn xác, không dài dòng).
+   - keyTakeaway: 1 câu ghi nhớ ngắn (hoặc hoạt động tương tác lớp học) ở cuối slide.
+   - speakerNotes: Gợi ý lời giảng / câu hỏi gợi mở cho giáo viên khi trình chiếu.
+   - imageScenePrompt: Mô tả BẰNG TIẾNG ANH chi tiết cảnh minh họa trực quan phù hợp nội dung slide đó để gửi cho AI vẽ ảnh. CHỈ mô tả cảnh vật, hành động, đồ vật học tập, bối cảnh; TUYỆT ĐỐI KHÔNG yêu cầu vẽ chữ viết, con số, phép tính có ký tự, bảng chữ hay bong bóng thoại.
+   - visualMotif: Chọn đúng 1 giá trị trong: book, sparkles, lightbulb, compass, puzzle, award, users, leaf.`;
+
+const PPT_OUTLINE_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    deckTitle: { type: Type.STRING },
+    subtitle: { type: Type.STRING },
+    slides: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          slideNumber: { type: Type.INTEGER },
+          title: { type: Type.STRING },
+          bullets: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+          },
+          keyTakeaway: { type: Type.STRING },
+          speakerNotes: { type: Type.STRING },
+          imageScenePrompt: { type: Type.STRING },
+          visualMotif: { type: Type.STRING },
+        },
+        required: [
+          'slideNumber',
+          'title',
+          'bullets',
+          'keyTakeaway',
+          'speakerNotes',
+          'imageScenePrompt',
+          'visualMotif',
+        ],
+      },
+    },
+  },
+  required: ['deckTitle', 'subtitle', 'slides'],
+};
+
+function sanitizeMascotIds(raw: string[]): string[] {
+  const validIds = new Set(PPT_MASCOT_LIBRARY.map((m) => m.id));
+  const unique = Array.from(new Set(raw.filter((id) => validIds.has(id)))).slice(0, 2);
+  return unique.length > 0 ? unique : [PPT_MASCOT_LIBRARY[0].id];
+}
+
 export async function generatePptOutline(
   config: PptGenerationConfig
 ): Promise<PptOutlineResponse> {
-  const headers = await buildTeacherApiHeaders();
+  const monHoc = (config.monHoc || '').trim().slice(0, 80);
+  const khoiLop = (config.khoiLop || '').trim() as PptGradeLevel;
+  const tenBaiHoc = (config.tenBaiHoc || '').trim().slice(0, 180);
+  const soSlideRaw = Number(config.soSlide ?? 6);
+  const soSlide = Number.isFinite(soSlideRaw)
+    ? Math.min(10, Math.max(4, Math.round(soSlideRaw)))
+    : 6;
+  const yeuCauBoSung = (config.yeuCauBoSung || '').trim().slice(0, 500);
 
-  const response = await fetch('/api/generate-ppt', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(config),
-  });
-
-  const data = (await response.json().catch(() => ({}))) as Partial<PptOutlineResponse> & {
-    error?: string;
-  };
-
-  if (!response.ok || !Array.isArray(data.slides)) {
-    throw new Error(
-      data.error || `Không thể tạo dàn ý bài giảng PPT (mã lỗi ${response.status}).`
-    );
+  if (!monHoc) {
+    throw new Error('Vui lòng chọn môn học.');
+  }
+  if (!ALLOWED_GRADES.includes(khoiLop)) {
+    throw new Error('Vui lòng chọn khối lớp từ 1 đến 5.');
+  }
+  if (tenBaiHoc.length < 2) {
+    throw new Error('Vui lòng nhập tên bài học / chủ đề bài giảng.');
   }
 
-  return data as PptOutlineResponse;
+  const mascotIds = sanitizeMascotIds(config.mascotIds || []);
+  const mascotNames = mascotIds
+    .map((id) => PPT_MASCOT_LIBRARY.find((m) => m.id === id)?.name)
+    .filter(Boolean)
+    .join(' và ');
+
+  const prompt = [
+    `Hãy thiết kế bộ bài giảng PowerPoint gồm ĐÚNG ${soSlide} slide cho:`,
+    `- Môn học: ${monHoc}`,
+    `- Khối lớp: Lớp ${khoiLop} (Tiểu học Việt Nam)`,
+    `- Tên bài học / chủ đề: ${tenBaiHoc}`,
+    `- Nhân vật đồng hành cố định xuất hiện trong minh họa các slide: ${mascotNames}`,
+    yeuCauBoSung ? `- Yêu cầu sư phạm bổ sung từ giáo viên: ${yeuCauBoSung}` : '',
+    `Lưu ý: Phần imageScenePrompt viết bằng tiếng Anh ngắn gọn rõ ràng, mô tả cảnh minh họa sinh động gắn với ${mascotNames} và nội dung bài học, tuyệt đối không nhắc đến chữ viết hay con số trong tranh.`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const { text } = await generateTextWithClientGemini({
+    contents: prompt,
+    config: {
+      systemInstruction: PPT_OUTLINE_SYSTEM_INSTRUCTION,
+      responseMimeType: 'application/json',
+      responseSchema: PPT_OUTLINE_SCHEMA,
+      maxOutputTokens: 6144,
+    },
+  });
+
+  let parsed: Record<string, unknown>;
+  try {
+    const cleaned = text
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/```\s*$/i, '')
+      .trim();
+    parsed = JSON.parse(cleaned) as Record<string, unknown>;
+  } catch {
+    throw new Error('AI trả về cấu trúc JSON bài giảng chưa hợp lệ. Vui lòng thử lại.');
+  }
+
+  const rawSlides = Array.isArray(parsed.slides) ? parsed.slides : [];
+  if (rawSlides.length === 0) {
+    throw new Error('AI chưa sinh được danh sách slide. Vui lòng thử lại.');
+  }
+
+  const slides = rawSlides.slice(0, 12).map((item, idx) => {
+    const row = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+    const rawMotif = typeof row.visualMotif === 'string' ? row.visualMotif.trim() : 'book';
+    const visualMotif = ALLOWED_MOTIFS.includes(rawMotif as SlideVisualMotif)
+      ? (rawMotif as SlideVisualMotif)
+      : ALLOWED_MOTIFS[idx % ALLOWED_MOTIFS.length];
+
+    const bullets = Array.isArray(row.bullets)
+      ? row.bullets
+          .map((b) => String(b ?? '').trim())
+          .filter(Boolean)
+          .slice(0, 5)
+      : [];
+
+    return {
+      slideNumber: idx + 1,
+      title: String(row.title || `Hoạt động ${idx + 1}`).trim(),
+      bullets:
+        bullets.length > 0
+          ? bullets
+          : [`Tìm hiểu nội dung trọng tâm của bài ${tenBaiHoc}.`],
+      keyTakeaway: String(
+        row.keyTakeaway || 'Ghi nhớ kiến thức trọng tâm và chia sẻ cùng bạn bè.'
+      ).trim(),
+      speakerNotes: String(
+        row.speakerNotes || 'Giáo viên gợi mở cho học sinh quan sát hình ảnh minh họa bên phải.'
+      ).trim(),
+      imageScenePrompt: String(
+        row.imageScenePrompt ||
+          `Friendly classroom learning scene for primary school lesson about ${tenBaiHoc}`
+      ).trim(),
+      visualMotif,
+    };
+  });
+
+  return {
+    deckTitle: String(parsed.deckTitle || tenBaiHoc).trim(),
+    subtitle: String(
+      parsed.subtitle || `Môn ${monHoc} · Lớp ${khoiLop} · Chương trình GDPT 2018`
+    ).trim(),
+    slides,
+  };
 }
 
 export interface SlideImageRequestParams {
@@ -56,66 +219,125 @@ export interface SlideImageRequestParams {
   styleId: PptStyleId;
   sharedStylePrompt: string;
   mascotIds: string[];
+  visualMotif?: SlideVisualMotif;
+  slideNumber?: number;
+}
+
+export function buildFinalSlideImagePrompt(params: SlideImageRequestParams): string {
+  const stylePreset =
+    PPT_STYLE_LIBRARY.find((s) => s.id === params.styleId) ?? PPT_STYLE_LIBRARY[0];
+  const globalStyle = params.sharedStylePrompt.trim() || stylePreset.stylePrompt;
+
+  const mascots = sanitizeMascotIds(params.mascotIds || [])
+    .map((id) => PPT_MASCOT_LIBRARY.find((m) => m.id === id)?.promptDesc)
+    .filter((v): v is string => Boolean(v));
+
+  const mascotClause =
+    mascots.length > 0
+      ? `FIXED RECURRING CHARACTERS (keep exact same appearance, clothing, colors, and proportions in every slide): ${mascots.join(' together with ')}.`
+      : '';
+
+  return [
+    `SHARED VISUAL STYLE: ${globalStyle}.`,
+    mascotClause,
+    `EDUCATIONAL SCENE TO ILLUSTRATE (Vietnamese primary school Grade ${params.khoiLop}, subject ${params.monHoc}, slide topic "${params.slideTitle}"): ${params.scenePrompt || params.slideTitle}.`,
+    `STRICT MANDATORY CONSTRAINTS:`,
+    `- ZERO TEXT: Strictly no text, no letters, no words, no alphabet characters, no captions, no speech bubbles, no chalk writing, no book titles anywhere in the image.`,
+    `- ZERO NUMBERS: Strictly no numbers, no digits, no clocks with numbers, no math formulas or symbols.`,
+    `- CLEAN BACKGROUND: Bright, clean, uncluttered soft background with balanced breathing room suitable for an educational presentation slide.`,
+    `- AUDIENCE: Warm, cheerful, culturally appropriate, completely safe and friendly for Vietnamese primary school students (ages 6 to 11).`,
+    `- FORMAT: Wide 16:9 landscape composition with clear focal subject on a clean backdrop.`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+async function runWithTimeoutAndAbort<T>(
+  task: Promise<T>,
+  timeoutMs: number,
+  externalSignal?: AbortSignal
+): Promise<T> {
+  if (externalSignal?.aborted) {
+    throw new DOMException('Đã hủy tác vụ sinh ảnh.', 'AbortError');
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Hết thời gian chờ sinh ảnh (timeout 45 giây).'));
+    }, timeoutMs);
+
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      reject(new DOMException('Đã hủy tác vụ sinh ảnh.', 'AbortError'));
+    };
+
+    externalSignal?.addEventListener('abort', onAbort, { once: true });
+
+    task
+      .then((res) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        externalSignal?.removeEventListener('abort', onAbort);
+        resolve(res);
+      })
+      .catch((err) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        externalSignal?.removeEventListener('abort', onAbort);
+        reject(err);
+      });
+  });
 }
 
 export async function requestSingleSlideImage(
   params: SlideImageRequestParams,
   externalSignal?: AbortSignal
 ): Promise<{ imageDataUrl: string; modelUsed: string }> {
-  const headers = await buildTeacherApiHeaders();
-
-  const controller = new AbortController();
-  let timedOut = false;
-
-  const timer = window.setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, PPT_IMAGE_TIMEOUT_MS);
-
-  const onExternalAbort = () => controller.abort();
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      window.clearTimeout(timer);
-      throw new DOMException('Đã hủy tác vụ sinh ảnh.', 'AbortError');
-    }
-    externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  if (externalSignal?.aborted) {
+    throw new DOMException('Đã hủy tác vụ sinh ảnh.', 'AbortError');
   }
+
+  const finalPrompt = buildFinalSlideImagePrompt(params);
 
   try {
-    const response = await fetch('/api/generate-ppt-image', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(params),
-      signal: controller.signal,
-    });
+    const clientImg = await runWithTimeoutAndAbort(
+      generateImageWithClientGemini({ prompt: finalPrompt }),
+      PPT_IMAGE_TIMEOUT_MS,
+      externalSignal
+    );
 
-    const data = (await response.json().catch(() => ({}))) as {
-      imageDataUrl?: string;
-      modelUsed?: string;
-      error?: string;
-    };
-
-    if (!response.ok || !data.imageDataUrl) {
-      throw new Error(
-        data.error || `Không thể sinh ảnh minh họa (mã lỗi ${response.status}).`
-      );
+    if (clientImg?.imageDataUrl) {
+      return clientImg;
     }
-
-    return {
-      imageDataUrl: data.imageDataUrl,
-      modelUsed: data.modelUsed || 'gemini-image',
-    };
   } catch (err) {
-    if (timedOut) {
-      throw new Error('Hết thời gian chờ sinh ảnh (timeout 45 giây).');
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw err;
     }
-    throw err;
-  } finally {
-    window.clearTimeout(timer);
-    if (externalSignal) {
-      externalSignal.removeEventListener('abort', onExternalAbort);
-    }
+    // Fall through cleanly to Canvas 16:9 Mascot Slide Art fallback
   }
+
+  const fallbackArtUrl = generateSyncedMascotSlideArt({
+    styleId: params.styleId,
+    mascotIds: sanitizeMascotIds(params.mascotIds || []),
+    visualMotif: params.visualMotif || 'book',
+    slideNumber: params.slideNumber || 1,
+  });
+
+  if (fallbackArtUrl) {
+    return {
+      imageDataUrl: fallbackArtUrl,
+      modelUsed: 'mascot-canvas-16x9',
+    };
+  }
+
+  throw new Error('Không thể tạo ảnh minh họa cho slide.');
 }
 
 export async function generateImageWithRetry(
@@ -253,6 +475,8 @@ export async function generateSlideImagesInParallel(params: {
             styleId: slide.styleId,
             sharedStylePrompt,
             mascotIds,
+            visualMotif: slide.visualMotif,
+            slideNumber: slide.slideNumber,
           },
           {
             maxRetries: PPT_IMAGE_MAX_RETRIES,
