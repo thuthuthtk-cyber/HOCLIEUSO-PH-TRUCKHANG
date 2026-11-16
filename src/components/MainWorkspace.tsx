@@ -1,7 +1,7 @@
 import { ConfirmDialog } from './ConfirmDialog';
-import { GeminiConfigModal } from './GeminiConfigModal';
 import { HocLieuForm } from './HocLieuForm';
 import { MaterialPreviewModal } from './MaterialPreviewModal';
+import { DigitalResourcePortal } from './portal/DigitalResourcePortal';
 import { ExamGeneratorWorkspace } from './exam/ExamGeneratorWorkspace';
 import { LessonPlanGeneratorWorkspace } from './lesson/LessonPlanGeneratorWorkspace';
 import { PptGeneratorWorkspace } from './ppt/PptGeneratorWorkspace';
@@ -20,6 +20,14 @@ export function MainWorkspace({ state }: { state: KhoHocLieuState }) {
   const { profile } = state;
   if (!profile) return null;
   const canModerate = profile.vaiTro === 'toTruong' || profile.vaiTro === 'quanTri';
+
+  if (state.view === 'portal') {
+    return (
+      <div className="flex-1 min-w-0 flex flex-col bg-slate-100">
+        <DigitalResourcePortal profile={profile} />
+      </div>
+    );
+  }
 
   return (
     <>

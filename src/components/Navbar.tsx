@@ -7,12 +7,12 @@ import {
   FolderHeart,
   FolderPlus,
   Gamepad2,
+  Globe,
   Library,
   LogOut,
   Menu,
   Presentation,
   Shield,
-  Sparkles,
   UserCircle2,
   X,
 } from 'lucide-react';
@@ -25,7 +25,6 @@ interface NavbarProps {
   pendingApprovalCount: number;
   onNavigate: (view: AppView) => void;
   onSignOut: () => void;
-  onOpenGeminiConfig?: () => void;
 }
 
 export function Navbar({
@@ -35,7 +34,6 @@ export function Navbar({
   pendingApprovalCount,
   onNavigate,
   onSignOut,
-  onOpenGeminiConfig,
 }: NavbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const canCreateAiGame =
@@ -51,6 +49,7 @@ export function Navbar({
     visible: boolean;
   }[] = [
     { id: 'library', label: 'Kho học liệu', icon: Library, visible: true },
+    { id: 'portal', label: 'Cổng Kho Học Liệu', icon: Globe, visible: true },
     {
       id: 'myMaterials',
       label: 'Học liệu của tôi',
@@ -168,14 +167,6 @@ export function Navbar({
             {ROLE_LABELS[profile.vaiTro]} · {profile.toKhoi}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onOpenGeminiConfig}
-          className="w-full min-h-[42px] inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl border border-teal-300 bg-teal-50 text-teal-800 text-sm font-bold hover:bg-teal-100 transition-colors"
-        >
-          <Sparkles className="w-4 h-4 text-teal-700" />
-          Cấu hình Gemini API Key
-        </button>
         <button
           type="button"
           onClick={onSignOut}

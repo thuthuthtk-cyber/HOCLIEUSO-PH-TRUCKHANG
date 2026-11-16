@@ -2,6 +2,7 @@ import type { Timestamp } from 'firebase/firestore';
 
 export type AppView =
   | 'library'
+  | 'portal'
   | 'myMaterials'
   | 'upload'
   | 'aiGame'
